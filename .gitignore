@@ -22,3 +22,6 @@ dist/
 
 # Worktrees live outside the repo (../dragons-wt/) but ignore any stray local ones
 /dragons-wt/
+
+# Agent worktrees (managed by the harness; never track from main)
+.claude/
