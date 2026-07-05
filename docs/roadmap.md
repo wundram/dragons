@@ -1,10 +1,16 @@
 # Roadmap
 
+## Locked decisions (2026-07-05)
+- **Test bed = pure web / Three.js.** Browser generation + render, live sliders for human feedback, glTF export. Evaluated via Claude-in-Chrome screenshots + grok vision.
+- **MC target = NeoForge (leaning).** Reevaluate after research track 3 compares NeoForge vs Fabric for runtime-mesh entities.
+- **Art arc = cute→cool via growth.** Dragons START as cute babies and GROW INTO cooler, more aggressive-looking adults. The cute→cool transformation is driven by the growth step over age — not a fixed trait. Faces stay cartoonish/expressive at every age. See `design/cute-to-cool-arc.md`.
+
 ## Phase 0 — Kickoff (current)
 - [x] Repo, structure, AGENTS.md, README, grok wrapper.
+- [x] Key decisions locked (above).
 - [ ] Research fan-out (4 tracks below) → `research/`.
 - [ ] Feasibility verdict for evolving models in a Minecraft mod.
-- [ ] Test-bed tech decision (informed by research).
+- [ ] Test-bed scaffold (Three.js) once research informs the generator approach.
 
 ## Phase 1 — Research (parallel)
 1. **Parametric creature modeling** — prior art on generating animal/creature 3D models from parameters (Spore, spline/metaball rigs, box-modeling generators, ML/latent approaches). → `research/parametric-creature-modeling.md`

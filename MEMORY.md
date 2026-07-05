@@ -1,0 +1,1 @@
+- [Dragons project](dragons-project.md) — core decisions for the MC procedurally-grown dragon-pets mod (~/dragons)
