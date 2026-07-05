@@ -5,12 +5,15 @@
 - **MC target = NeoForge (leaning).** Reevaluate after research track 3 compares NeoForge vs Fabric for runtime-mesh entities.
 - **Art arc = cute→cool via growth.** Dragons START as cute babies and GROW INTO cooler, more aggressive-looking adults. The cute→cool transformation is driven by the growth step over age — not a fixed trait. Faces stay cartoonish/expressive at every age. See `design/cute-to-cool-arc.md`.
 
-## Phase 0 — Kickoff (current)
+## Phase 0 — Kickoff
 - [x] Repo, structure, AGENTS.md, README, grok wrapper.
 - [x] Key decisions locked (above).
-- [ ] Research fan-out (4 tracks below) → `research/`.
-- [ ] Feasibility verdict for evolving models in a Minecraft mod.
-- [ ] Test-bed scaffold (Three.js) once research informs the generator approach.
+- [x] Research fan-out (4 tracks) → `research/` — all four complete and converged.
+- [x] Feasibility verdict: **GREEN LIGHT** — runtime evolving meshes are low-risk at ≤10 pets; NeoForge confirmed. See `design/architecture-synthesis.md`.
+- [x] Synthesis of the four tracks → `design/architecture-synthesis.md`.
+- [~] Test-bed harness scaffold (Three.js) — build agent in progress; merge & verify pending.
+
+**Open question carried into Phase 2 — the "skin tension":** box-per-bone cuboids (cheap, MC-native) vs tapered/smoothed skin (cuter). Test bed will run dual skin modes and resolve it with human + grok-vision feedback. Do not hard-commit the skin representation yet.
 
 ## Phase 1 — Research (parallel)
 1. **Parametric creature modeling** — prior art on generating animal/creature 3D models from parameters (Spore, spline/metaball rigs, box-modeling generators, ML/latent approaches). → `research/parametric-creature-modeling.md`
