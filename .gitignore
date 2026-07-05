@@ -1,0 +1,24 @@
+# Rendered output from the test bed (promote keepers to art/reference/)
+testbed/out/
+**/out/
+*.tmp.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Worktrees live outside the repo (../dragons-wt/) but ignore any stray local ones
+/dragons-wt/
