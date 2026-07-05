@@ -29,3 +29,6 @@ dist/
 # testbed render harness deps
 testbed/tools/node_modules/
 testbed/tools/package-lock.json
+
+# transient logs (keep .agents/resume/ tracked)
+.agents/*.log
