@@ -1,0 +1,2 @@
+# Rendered PNG/glTF output lands here. This directory is gitignored (see repo
+# .gitignore → testbed/out/). Promote keepers to art/reference/.
