@@ -22,10 +22,16 @@
 4. **Expressive cartoon eyes & brows** — prior art on steerable eye rigs and floating-brow emotion systems that scale onto any face; mapping emotions to eye/brow pose. → `research/expressive-faces.md`
 
 ## Phase 2 — Test bed
-- Standalone generator + renderer (no Minecraft). Genome → mesh → image.
-- Growth loop: iterate the step function, render each stage.
-- Evaluation harness: Claude Read + grok vision score each render.
-- Human-feedback loop to tune parameters/rules.
+- [x] Standalone Three.js harness merged to `main` (viewer, auto-sliders, age scrub, glTF/PNG export). See `testbed/`.
+- [x] Headless render/eval harness (`testbed/tools/render.mjs`) — drives the page in headless Chrome, scrubs age, auto-frames, writes PNGs. Canonical eval path (Chrome extension not required).
+- [x] Eval loop proven: page → render → Claude Read + `tools/grok.sh eval`. First eval in `design/testbed-eval-01.md`.
+- [x] Cute→cool arc verified on the placeholder (age slider drives a real transformation).
+- [ ] **Real generator:** replace placeholder internals with skeleton + tagged attachment slots + allometric growth curves (from `design/architecture-synthesis.md`). Build order: skeleton + per-bone skin w/ age → tube/L-system horns & wings → face sub-rig → markings.
+- [ ] **Resolve the skin tension:** implement dual skin modes (box-per-bone cuboid vs tapered/smoothed) and compare with human + grok-vision feedback.
+- [ ] Work the P0/P1 defect backlog in `design/testbed-eval-01.md` (floating baby horns, cross-eyed pupils, larval body, flat wings, tube snout).
+- [ ] Genome crossover control (breed two genomes → offspring) to test breeding early.
+- [ ] `geo.json` export path (alongside glTF) to keep the Minecraft bridge honest.
+- [ ] Human-feedback loop to tune parameters/rules.
 
 ## Phase 3 — Generate & tune
 - Produce candidate dragons across the trait space.

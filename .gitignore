@@ -25,3 +25,7 @@ dist/
 
 # Agent worktrees (managed by the harness; never track from main)
 .claude/
+
+# testbed render harness deps
+testbed/tools/node_modules/
+testbed/tools/package-lock.json

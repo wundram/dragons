@@ -1,0 +1,12 @@
+{
+  "name": "dragons-testbed-render",
+  "private": true,
+  "type": "module",
+  "description": "Headless Chrome render/eval harness for the Dragons test bed.",
+  "scripts": {
+    "render": "node render.mjs --ages 0,0.5,1 --out ../out --hideui"
+  },
+  "dependencies": {
+    "puppeteer-core": "^23.0.0"
+  }
+}
