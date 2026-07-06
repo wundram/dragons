@@ -32,6 +32,8 @@
 import * as THREE from 'three';
 import { createFaceRig, applyFaceParams } from './face.js';
 import { buildFieldMesh } from './field.js';
+import { buildVoxelSkin } from './voxel.js';
+import { exportGeoJSON } from './geojson.js';
 
 // ---------------------------------------------------------------------------
 // GENOME_SCHEMA
@@ -533,13 +535,18 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   dragon.name = 'dragon';
 
   // Skin mode: 'smooth' = implicit-field + marching-cubes single mesh (default);
-  // 'capsule' = the Step-1 raw per-bone capsules (cheap fallback / comparison).
+  // 'voxel'  = greedy-voxelized cuboids from the SAME field (Minecraft-native,
+  //            Step 3); 'capsule' = the Step-1 raw per-bone capsules (fallback).
   // Honors env.skinMode, falling back to a window.__skinMode global so the
   // headless harness can flip modes without editing app.js (same pattern as
   // window.__showRig).
   const skinMode = env.skinMode
     ?? (typeof window !== 'undefined' ? window.__skinMode : undefined)
     ?? 'smooth';
+  // 'smooth' and 'voxel' both build ONE solid body FROM THE FIELD that already
+  // includes the head (skull/snout/jaw) — so the separate skull/snout/jaw meshes
+  // and per-capsule limbs are skipped, and only the face rig layers on top.
+  const fieldBody = skinMode === 'smooth' || skinMode === 'voxel';
 
   const skull = byName['skull'];
   const R = skull.headR;
@@ -565,6 +572,28 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     if (typeof console !== 'undefined') {
       console.log(`[field] marching-cubes ${stats.grid.join('x')} grid, ${stats.envelopes} envelopes`
         + ` -> ${stats.tris} tris / ${stats.verts} verts in ${stats.ms.toFixed(1)} ms`);
+    }
+  } else if (skinMode === 'voxel') {
+    // ---- VOXEL BODY (Step 3): greedy-meshed cuboids from the same field -----
+    // Organic rounded silhouette, blocky surface — the Minecraft-native skin.
+    // Reads window.__voxelRes (longest-axis voxels) / window.__voxelHeadRes.
+    const voxelRes = env.voxelRes
+      ?? (typeof window !== 'undefined' ? window.__voxelRes : undefined) ?? 24;
+    const headRes = env.voxelHeadRes
+      ?? (typeof window !== 'undefined' ? window.__voxelHeadRes : undefined) ?? 1;
+    const smoothK = env.smoothK
+      ?? (typeof window !== 'undefined' ? window.__fieldSmoothK : undefined);
+    const { group: bodyGroup, stats } = buildVoxelSkin(bones, {
+      voxelRes, headRes,
+      ...(smoothK !== undefined ? { smoothK } : {}),
+    }, mat);
+    dragon.add(bodyGroup);
+    dragon.userData.voxelCubes = bodyGroup.userData.voxelCubes;
+    dragon.userData.fieldStats = stats;
+    if (typeof console !== 'undefined') {
+      console.log(`[voxel] ${stats.grid.join('x')} grid, ${stats.envelopes} envelopes, ${stats.solidVoxels}`
+        + ` solid voxels -> ${stats.cubes} greedy cubes in ${stats.ms.toFixed(1)} ms`
+        + (stats.headHiRes > 1 ? ` (head ${stats.headHiRes}x)` : ''));
     }
   } else {
     // ---- CAPSULE BODY (Step-1): spine + tail capsule chain + belly --------
@@ -596,7 +625,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   head.name = 'head';
   head.position.copy(skull.pos);
 
-  if (skinMode !== 'smooth') {
+  if (!fieldBody) {
     const skullMesh = new THREE.Mesh(_unitSphere, mat);
     skullMesh.name = 'skull';
     skullMesh.scale.set(R * 0.98, R * 0.92, R * 1.06);
@@ -620,7 +649,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     headRadius: R,
     eyeSize: p.eyeSize * R * 0.42,
     eyeHeight: p.eyeHeight,
-    eyeForward: skinMode === 'smooth' ? Math.min(0.95, p.eyeFwd + 0.06) : p.eyeFwd,
+    eyeForward: fieldBody ? Math.min(0.95, p.eyeFwd + 0.06) : p.eyeFwd,
   });
   face.name = 'faceRig';
   head.add(face);
@@ -628,8 +657,8 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   head.userData.headRadius = R;
   dragon.add(head);
 
-  // ---- LIMBS (capsule mode only; smooth mode limbs live in the field) -----
-  if (skinMode !== 'smooth') {
+  // ---- LIMBS (capsule mode only; smooth/voxel limbs live in the field) ----
+  if (!fieldBody) {
     const limbs = new THREE.Group();
     limbs.name = 'limbs';
     for (const b of bones) {
@@ -667,8 +696,26 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   dragon.userData = {
     genome: { ...genome }, age, env, phenotype: p, skeleton: bones,
     skinMode, fieldStats: dragon.userData.fieldStats,
+    voxelCubes: dragon.userData.voxelCubes,
   };
   return dragon;
+}
+
+// ---------------------------------------------------------------------------
+// Bedrock geo.json export hook (Step 3). app.js owns window.__testbed but we
+// must not edit it, so we self-install exportGeoJSON onto it once it exists
+// (same non-invasive pattern as window.__ARCHETYPES). exportGeoJSON(opts) bakes
+// the CURRENT on-screen dragon's skeleton to a Bedrock geo.json string,
+// regardless of the active skin mode.
+if (typeof window !== 'undefined') {
+  const install = () => {
+    if (window.__testbed && !window.__testbed.exportGeoJSON) {
+      window.__testbed.exportGeoJSON = (opts = {}) =>
+        exportGeoJSON(window.__testbed.dragon, opts);
+    }
+    if (!window.__testbed || !window.__testbed.exportGeoJSON) setTimeout(install, 50);
+  };
+  install();
 }
 
 // Thin-line bone/rig debug overlay (env.showRig). Draws parent->child links plus
