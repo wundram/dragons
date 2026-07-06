@@ -36,8 +36,13 @@
 
 import * as THREE from 'three';
 
-const EPS = 0.012;        // envelopeRadius below this => bone absent (matches generator)
+export const EPS = 0.012;        // envelopeRadius below this => bone absent (matches generator)
 const FAR = 1e3;          // field value for cells no envelope touched (well outside)
+
+// Default bone.kind values that become volumetric body envelopes (wings stay as
+// thin spar sheets, handled separately). Shared by the smooth (marching-cubes)
+// and voxel (cuboid) back-ends so both skin the SAME field.
+export const DEFAULT_BODY_KINDS = new Set(['body', 'skull', 'limb', 'foot', 'girdle']);
 
 // ---------------------------------------------------------------------------
 // Signed-distance primitives (scalar, no allocation in the hot loop)
@@ -75,7 +80,7 @@ function sdSphere(px, py, pz, cx, cy, cz, r) {
 }
 
 // Signed distance of point (px,py,pz) to envelope `e`.
-function sdEnvelope(e, px, py, pz) {
+export function sdEnvelope(e, px, py, pz) {
   if (e.sphere) return sdSphere(px, py, pz, e.ax, e.ay, e.az, e.r1);
   return sdRoundCone(px, py, pz, e.ax, e.ay, e.az, e.bx, e.by, e.bz, e.r1, e.r2);
 }
@@ -87,7 +92,7 @@ function sdEnvelope(e, px, py, pz) {
 // excluded — thin sheets are the classic implicit-field failure). Returns
 // { envelopes, boneNames } where boneNames[i] is the bone name for envelope i
 // (index used by the skin weights).
-function buildEnvelopes(bones, kinds, margin) {
+export function buildEnvelopes(bones, kinds, margin) {
   const envelopes = [];
   const boneNames = [];
   for (const b of bones) {
@@ -205,7 +210,7 @@ export function buildFieldMesh(bones, opts = {}) {
   const fieldRes = Math.max(16, Math.round(opts.fieldRes ?? 64));
   const k = opts.smoothK ?? 5.5;
   const topN = Math.min(4, Math.max(1, opts.topN ?? 4));
-  const kinds = opts.kinds ?? new Set(['body', 'skull', 'limb', 'foot', 'girdle']);
+  const kinds = opts.kinds ?? DEFAULT_BODY_KINDS;
   const pad = opts.pad ?? 0.12;
   const margin = 2.0 / k;               // blend reach in world units
 

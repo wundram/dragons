@@ -38,8 +38,10 @@ const url = arg('url', 'http://localhost:8000/');
 const hideui = !!arg('hideui', false);
 const genomeOverride = arg('genome', null);
 const emotion = arg('emotion', null);
-const skinmode = arg('skinmode', null);   // 'smooth' | 'capsule' (Step-2)
+const skinmode = arg('skinmode', null);   // 'smooth' | 'voxel' | 'capsule'
 const fieldres = arg('fieldres', null);   // marching-cubes resolution knob
+const voxelres = arg('voxelres', null);   // voxel-cuboid resolution knob (Step-3)
+const voxelheadres = arg('voxelheadres', null); // hybrid hi-res head multiplier
 const [vw, vh] = String(arg('size', hideui ? '900x900' : '1100x900')).split('x').map(Number);
 
 const browser = await puppeteer.launch({
@@ -80,12 +82,14 @@ if (hideui) {
 // fallback when env doesn't specify them (same pattern as window.__showRig), so
 // we can flip modes here without touching app.js.
 const fieldsmooth = arg('fieldsmooth', null);  // smooth-min / softmax temperature
-if (skinmode || fieldres || fieldsmooth) {
-  await page.evaluate((sm, fr, fs) => {
+if (skinmode || fieldres || fieldsmooth || voxelres || voxelheadres) {
+  await page.evaluate((sm, fr, fs, vr, vhr) => {
     if (sm) window.__skinMode = sm;
     if (fr) window.__fieldRes = Number(fr);
     if (fs) window.__fieldSmoothK = Number(fs);
-  }, skinmode, fieldres, fieldsmooth);
+    if (vr) window.__voxelRes = Number(vr);
+    if (vhr) window.__voxelHeadRes = Number(vhr);
+  }, skinmode, fieldres, fieldsmooth, voxelres, voxelheadres);
 }
 
 if (genomeOverride) {
