@@ -83,6 +83,34 @@
     #err { position: absolute; inset: 12px 12px auto 12px; background: #4a1f1f;
       color: #ffd7d7; border: 1px solid #a33; border-radius: 8px; padding: 10px 12px;
       font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; display: none; }
+
+    /* ---- Skin & View / Gallery groups ---- */
+    .emotion-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+    .emotion-row label { color: var(--muted); font-size: 11px; }
+    .emotion-row select { flex: 1; }
+    .row.chk { grid-template-columns: 92px 1fr; }
+    .row.wide { grid-template-columns: 1fr; }
+    .row.dim { opacity: .4; }
+    .row select { width: 100%; }
+    .grp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .grp-btns button { flex: 1; }
+
+    /* ---- in-browser gallery overlay ---- */
+    #gallery { position: absolute; inset: 0; z-index: 20; display: none;
+      flex-direction: column; background: rgba(15,20,27,.97); }
+    #galleryBar { display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    #galleryTitle { font-size: 13px; margin: 0; color: var(--accent); font-weight: 600; }
+    #galleryStatus { color: var(--muted); font-size: 11px; font-weight: 400; }
+    #galleryGrid { flex: 1; overflow: auto; padding: 14px; }
+    .galRow { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+      margin-bottom: 14px; }
+    .galCell { margin: 0; background: var(--panel2); border: 1px solid var(--line);
+      border-radius: 8px; padding: 6px; width: 200px; }
+    .galCell img { width: 100%; height: 180px; object-fit: contain; display: block;
+      background: #14141c; border-radius: 4px; }
+    .galCell figcaption { text-align: center; color: var(--muted); font-size: 11px;
+      margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -97,20 +125,69 @@
           <input id="age" type="range" min="0" max="1" step="0.005" value="0" />
           <div class="hint">0 = cute baby · 1 = cool adult</div>
         </div>
+        <!-- Emotion lives here (right under AGE) so it stays the FIRST <select>
+             in the document — render.mjs --emotion targets querySelector('select'). -->
+        <div class="emotion-row">
+          <label for="emotion">Emotion</label>
+          <select id="emotion"></select>
+          <button id="btnCopy" title="Copy genome JSON">⧉ Copy</button>
+        </div>
       </div>
 
-      <div id="controls"><!-- sliders injected from GENOME_SCHEMA --></div>
+      <div id="controls">
+        <!-- Skin & View: capabilities that used to be console/CLI-only. -->
+        <section class="group">
+          <h3>Skin &amp; View</h3>
+          <div class="row">
+            <label title="Body skinning method">Skin mode</label>
+            <select id="skinMode">
+              <option value="smooth">Smooth</option>
+              <option value="capsule">Capsule</option>
+              <option value="voxel">Voxel (Minecraft)</option>
+            </select>
+            <span></span>
+          </div>
+          <div class="row" id="voxelResRow">
+            <label title="Voxel grid resolution (only used in Voxel mode)">Voxel res</label>
+            <input id="voxelRes" type="range" min="12" max="40" step="1" value="24" />
+            <span class="val" id="voxelResVal">24</span>
+          </div>
+          <div class="row chk">
+            <label title="Overlay the bone rig">Show rig</label>
+            <input id="showRig" type="checkbox" />
+          </div>
+          <div class="row">
+            <label title="Load an archetype genome into the live sliders">Archetype</label>
+            <select id="archetype">
+              <option value="custom">Custom</option>
+              <option value="snake">Snake</option>
+              <option value="wyvern">Wyvern</option>
+              <option value="quadruped">Quadruped</option>
+              <option value="eastern">Eastern</option>
+            </select>
+            <span></span>
+          </div>
+          <div class="row wide">
+            <button id="btnExportGeo" title="Download the current dragon as a Bedrock geo.json">⬇ Export geo.json</button>
+          </div>
+        </section>
+        <!-- Gallery: batch-render thumbnails with the single renderer. -->
+        <section class="group">
+          <h3>Gallery</h3>
+          <div class="grp-btns">
+            <button id="btnGalAge">Age strip</button>
+            <button id="btnGalVar">Variation</button>
+            <button id="btnGalTree">Breeding tree</button>
+          </div>
+        </section>
+        <!-- genome sliders injected from GENOME_SCHEMA below -->
+      </div>
 
       <div id="actions">
         <button id="btnRandom">🎲 Randomize</button>
         <button id="btnReset">↺ Reset</button>
         <button id="btnExport">⬇ glTF</button>
         <button id="btnShot">📷 PNG</button>
-        <div class="row2">
-          <label for="emotion">Emotion</label>
-          <select id="emotion"></select>
-          <button id="btnCopy" title="Copy genome JSON">⧉ Copy</button>
-        </div>
       </div>
       <div id="readoutWrap">
         <textarea id="readout" readonly spellcheck="false"></textarea>
@@ -122,6 +199,14 @@
       <canvas id="view"></canvas>
       <div id="hud">drag = orbit · scroll = zoom · right-drag = pan</div>
       <div id="err"></div>
+      <!-- In-browser gallery overlay (thumbnail grid over the 3D stage). -->
+      <div id="gallery">
+        <div id="galleryBar">
+          <h2 id="galleryTitle">Gallery <span id="galleryStatus"></span></h2>
+          <button id="galleryClose">✕ Close</button>
+        </div>
+        <div id="galleryGrid"></div>
+      </div>
     </div>
   </div>
 

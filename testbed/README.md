@@ -32,6 +32,16 @@ Then in the browser:
 - Tune any trait slider (grouped: Body / Head / Limbs / Features / Color / Face).
 - **Randomize** / **Reset**, pick an **Emotion** preset, **Copy** the genome JSON.
 - **⬇ glTF** and **📷 PNG** download the current model / render.
+- **Skin & View** group: **Skin mode** (Smooth / Capsule / Voxel-Minecraft),
+  **Voxel res** (voxel mode only), **Show rig** overlay, **Archetype** loader
+  (Custom / Snake / Wyvern / Quadruped / Eastern → copies that genome into the
+  live sliders), and **⬇ Export geo.json** (Bedrock geometry download). Skin
+  settings flow into `generateDragon` via an explicit `env`, and are also mirrored
+  onto `window.__skinMode` / `__voxelRes` / `__showRig` so the headless tools that
+  poke those globals keep working.
+- **Gallery** group: **Age strip** / **Variation** / **Breeding tree** render
+  thumbnail grids into an overlay over the 3D stage (reusing the single renderer),
+  respecting the current skin mode. Close with **✕ Close**.
 
 ### Offline
 
@@ -206,7 +216,7 @@ the final sheet path(s) are printed as the last line(s) for scripted evaluation.
 | File | What it is |
 |---|---|
 | `index.html` | Page shell, importmap (CDN pin / offline note), UI layout, styles. |
-| `src/app.js` | The harness: scene, lights, OrbitControls, auto-built panel, buttons, export. Talks to the generator only via the contract. |
+| `src/app.js` | The harness: scene, lights, OrbitControls, auto-built panel, Skin & View + Gallery groups, buttons, export. Talks to the generator only via the contract. |
 | `src/generator.js` | **Interface contract** + placeholder generator (`GENOME_SCHEMA`, `DEFAULT_GENOME`, `generateDragon`, `phenotype`). |
 | `src/face.js` | Reusable, scalable eye+brow face rig + emotion presets. |
 | `tools/render.mjs` | Headless Chrome render harness (single shots across ages). |
