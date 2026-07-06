@@ -38,6 +38,8 @@ const url = arg('url', 'http://localhost:8000/');
 const hideui = !!arg('hideui', false);
 const genomeOverride = arg('genome', null);
 const emotion = arg('emotion', null);
+const skinmode = arg('skinmode', null);   // 'smooth' | 'capsule' (Step-2)
+const fieldres = arg('fieldres', null);   // marching-cubes resolution knob
 const [vw, vh] = String(arg('size', hideui ? '900x900' : '1100x900')).split('x').map(Number);
 
 const browser = await puppeteer.launch({
@@ -63,11 +65,27 @@ if (hideui) {
     }
     const panel = document.querySelector('#panel, .panel, aside, .controls');
     if (panel) panel.style.display = 'none';
+    // Collapse the CSS-grid panel column so the canvas reflows to full width
+    // (otherwise the reserved 320px column letterboxes creature-only shots).
+    const appEl = document.querySelector('#app');
+    if (appEl) appEl.style.gridTemplateColumns = '1fr';
     document.body.style.margin = '0';
     // let the app's resize handler grow the canvas into the freed space
     window.dispatchEvent(new Event('resize'));
   });
   await new Promise(r => setTimeout(r, 150));
+}
+
+// Step-2 skin controls: generator.js reads window.__skinMode / __fieldRes as a
+// fallback when env doesn't specify them (same pattern as window.__showRig), so
+// we can flip modes here without touching app.js.
+const fieldsmooth = arg('fieldsmooth', null);  // smooth-min / softmax temperature
+if (skinmode || fieldres || fieldsmooth) {
+  await page.evaluate((sm, fr, fs) => {
+    if (sm) window.__skinMode = sm;
+    if (fr) window.__fieldRes = Number(fr);
+    if (fs) window.__fieldSmoothK = Number(fs);
+  }, skinmode, fieldres, fieldsmooth);
 }
 
 if (genomeOverride) {
