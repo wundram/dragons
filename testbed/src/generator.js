@@ -116,6 +116,10 @@ export const GENOME_SCHEMA = [
     description: 'Brow tilt: positive = inner-down (angry), negative = inner-up (sad/worried).' },
   { name: 'browCurve', min: -1.0, max: 1.0, default: 0.2, group: 'Face',
     description: 'Brow arch: positive = raised/curious arch, negative = flat/stern.' },
+  { name: 'mouthOpen', min: 0.0, max: 1.0, default: 0.06, group: 'Face',
+    description: 'Mouth / jaw opening: 0 = closed line, 1 = wide open (surprised).' },
+  { name: 'mouthCurve',min: -1.0, max: 1.0, default: 0.1, group: 'Face',
+    description: 'Mouth shape: positive = smile, negative = frown.' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -126,7 +130,7 @@ export const DEFAULT_GENOME = Object.freeze(
 );
 
 // Trait names the face rig consumes (used by app.js grouping/live-update too).
-export const FACE_TRAITS = ['eyeOpen', 'pupilX', 'pupilY', 'browHeight', 'browAngle', 'browCurve'];
+export const FACE_TRAITS = ['eyeOpen', 'pupilX', 'pupilY', 'browHeight', 'browAngle', 'browCurve', 'mouthOpen', 'mouthCurve'];
 
 // ---------------------------------------------------------------------------
 // ARCHETYPES — full genome objects that are attractor points in the continuous
@@ -276,6 +280,9 @@ export function phenotype(genome, age = 0, env = {}) {
       browHeight: g.browHeight + lerp(0.12, 0.0, s),
       browAngle:  g.browAngle + lerp(-0.15, 0.1, s),
       browCurve:  g.browCurve + lerp(0.25, 0.0, s),
+      // mouth: babies read a touch smilier & rounder, softening toward the adult.
+      mouthOpen:  g.mouthOpen,
+      mouthCurve: g.mouthCurve + lerp(0.12, 0.0, s),
     },
   };
 }
@@ -642,6 +649,24 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     }
   }
 
+  // ---- mouth placement from the skull/snout/jaw bones ---------------------
+  // The mouth is part of the face rig but the generator supplies WHERE it sits
+  // (the rig is head-agnostic). We put it along the snout/jaw seam on the front-
+  // lower head, in head-local space (origin = skull world pos), facing the head's
+  // forward direction. Sized in head-radius units so it reads at any age/scale.
+  const snoutB = byName['snout'], jawB = byName['jaw'];
+  const fwd = skull.fwd.clone().normalize();
+  const snoutSeam = snoutB.pos.clone().lerp(snoutB.tail, 0.5);
+  const jawSeam = jawB.pos.clone().lerp(jawB.tail, 0.5);
+  const mouthCenterW = snoutSeam.clone().lerp(jawSeam, 0.5)
+    .add(fwd.clone().multiplyScalar(snoutB.envelopeRadius * 0.35));
+  const mouthOpts = {
+    center: mouthCenterW.sub(skull.pos),            // head-local
+    forward: fwd,
+    up: new THREE.Vector3(0, 1, 0),
+    width: Math.max((snoutB.envelopeRadius + snoutB.rTail) * 1.7, R * 1.05),
+  };
+
   // Reusable face rig (unchanged face.js) sized to the skull radius. In smooth
   // mode we nudge it slightly forward/out so it sits ON the smooth head surface
   // (the field skull is a plain sphere of radius R).
@@ -650,6 +675,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     eyeSize: p.eyeSize * R * 0.42,
     eyeHeight: p.eyeHeight,
     eyeForward: fieldBody ? Math.min(0.95, p.eyeFwd + 0.06) : p.eyeFwd,
+    mouth: mouthOpts,
   });
   face.name = 'faceRig';
   head.add(face);
