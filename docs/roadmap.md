@@ -39,7 +39,8 @@
 ## Phase 2.5 — Tuning & polish (next)
 - [ ] **Cross-validated tuning backlog** (`design/testbed-eval-02.md`): P0 brows→soft arched shapes; P1 add mouth/jaw line; P1 clamp `robustness` beach-balls; facets; hind-leg absorption (`smoothK`); voxel warty underside; square-viewport framing.
 - [ ] **Wire the pose-sheet gallery** — weights now exist; add a pose API + `poses` gallery mode to evaluate the rig under motion.
-- [ ] **Wing membranes** (spar sheets), then CA-placed spikes/ridges + reaction-diffusion coloration (per user direction).
+- [~] **Face pass** (in progress): soft arched brows (fix the "floating sticks") + parametric mouth (`mouthOpen`/`mouthCurve`, wired to emotions). Teeth/tongue/fangs deferred.
+- [ ] **Limb/wing refactor + wing membranes** — adopt the **strict tetrapod rule** (`design/limb-and-wing-architecture.md`): wings are a FORELIMB expression (share the shoulder girdle), never a separate 5th/6th limb; fix the quadruped-with-wings "trap"; then skin the wing membrane between spars. Then CA-placed spikes/ridges + reaction-diffusion coloration (per user direction).
 - [ ] Genome crossover control (breed two genomes → egg/baby) — mutation tree is the first step.
 - [ ] Human-in-the-loop tuning pass with the galleries.
 
