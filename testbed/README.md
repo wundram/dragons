@@ -86,26 +86,31 @@ A default value per trait (derived from the schema so they can't drift apart).
 Returns a `THREE.Group` (the whole dragon, including the face rig) positioned so
 its feet rest near `y = 0`. `userData` carries `{ genome, age, env, phenotype }`.
 
-**Returned child structure** (names are stable; the harness relies on `faceRig`):
+**Returned child structure** (Step 1: fixed-topology skeleton skinned as raw
+per-bone tapered capsules; the harness only relies on the `faceRig` name):
 
 ```
-dragon (Group)                      userData: { genome, age, env, phenotype }
-├── body (Group)
-│   ├── torso (Group)  [ torsoMain, belly ]
-│   ├── neck  (Group)  stacked spheres, curves up to the head
-│   ├── tail  (Group)  stacked spheres, tapers out the back
-│   └── spikes (Group) dorsal cones (grow in with age)
-├── head (Group)                    userData: { faceRig, headRadius }
-│   ├── skull (Mesh)
-│   ├── snout (Mesh)
-│   ├── ridge (Mesh)
-│   ├── horns (Group)
+dragon (Group)   userData: { genome, age, env, phenotype, skeleton }
+├── body   (Group)  spine_00..23 + tail_00..11 capsule chain + belly patch
+├── head   (Group)  userData: { faceRig, headRadius }
+│   ├── skull (Mesh, ellipsoid) + snout + jaw capsules
 │   └── faceRig (Group)  ← from face.js: [ eyeL, eyeR, browL, browR ]
-├── limbs (Group)  [ legFL, legFR, legBL, legBR ]
-└── wings (Group)  [ wingL, wingR ]
+├── limbs  (Group)  fore/hind leg capsules + girdles (budding-gated; empty for a snake)
+├── wings  (Group)  wing spar capsules (budding-gated; empty when wingDev=0)
+└── rigDebug (LineSegments)  only when env.showRig (or window.__showRig) is set
 ```
 
 Reach the face rig anywhere with `dragon.getObjectByName('faceRig')`.
+
+**`userData.skeleton`** is the resolved fixed-topology bone tree: an array of
+`{ name, parent, pos:Vector3, length, envelopeRadius, tail?, rTail?, kind }`. The
+bone **name set is identical for every genome at every age** (59 bones:
+`spine_00..23`, `tail_00..11`, `skull`, `snout`, `jaw`, `shoulderGirdle`,
+`hipGirdle`, `{fore,hind}{L,R}_{upper,lower,foot}`, `wing{L,R}_{00,01,02}`).
+Growth only scales each bone's `length`/`envelopeRadius`; a limb whose `*Dev`
+trait is 0 has radius 0 and is simply skipped. **Step 2** sums each bone's
+`pos`→`tail` capsule envelope (radius `envelopeRadius`→`rTail`) into the implicit
+field.
 
 ### Helpers exported alongside the contract
 
@@ -115,6 +120,11 @@ Reach the face rig anywhere with `dragon.getObjectByName('faceRig')`.
 - `setDragonFace(dragon, faceParams)` — re-pose the face rig without a full
   rebuild (used by the emotion dropdown and live face sliders).
 - `FACE_TRAITS` — the six face-param trait names the face rig consumes.
+- `ARCHETYPES` — `{ snake, wyvern, quadruped, eastern }`, each a full genome
+  object that is an attractor point in the continuous trait space (all valid
+  poses of the one skeleton). Also on `window.__ARCHETYPES` for headless/console
+  use. Render an archetype headless with
+  `node render.mjs --genome '{"foreLimbDev":0,"hindLimbDev":0,"wingDev":0,...}'`.
 
 ### The face rig — `src/face.js`
 
