@@ -6,13 +6,18 @@
 //
 // WHAT IT EMITS
 // -------------
-// One `minecraft:geometry` entry whose `bones` are the STABLE skeleton bone names
-// (spine_00.., tail_00.., skull, snout, jaw, <fore|hind><L|R>_upper/lower/foot,
-// shoulderGirdle, hipGirdle, wingL/R_00..). Every skeleton bone is emitted (even
-// absent/zero-radius limbs and wing spars) so the bone tree + parent chain is
-// identical for every genome/age — keyframe animations authored against these
-// names survive every growth re-bake. Cubes from computeVoxelCubes() are grouped
-// under their assigned (dominant-bone) name as Bedrock `{origin,size,uv}`.
+// One `minecraft:geometry` entry whose `bones` are the STABLE skeleton bone names.
+// Backbone/head: spine_00.., tail_00.., skull, snout, jaw. Girdles: shoulderGirdle,
+// hipGirdle. The UNIFIED bat-wing forelimb (per side foreL/foreR): _upperArm,
+// _foreArm, _wrist, _finger{0..3}_{00,01,02} + _finger{0..3}_claw. Hind legs
+// (hindL/hindR): _upper, _lower, _foot, _toe{0..3}, _toe{0..3}_claw. There are NO
+// separate wing bones — the wing IS the forelimb (finger0 = primary spar); the
+// membrane is a separate render mesh, not a bone. Every skeleton bone is emitted
+// (even absent/zero-radius ones) so the bone tree + parent chain is identical for
+// every genome/age — keyframe animations authored against these names survive
+// every growth re-bake. Cubes from computeVoxelCubes() (body-volume kinds: body/
+// skull/limb/foot/girdle) attach under their dominant bone as `{origin,size,uv}`;
+// thin fingers/toes/claws carry no cubes but still appear as pivot bones.
 //
 // MODEL SCALE / COORDINATES (documented convention)
 // -------------------------------------------------
