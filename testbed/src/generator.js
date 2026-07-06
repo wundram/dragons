@@ -31,6 +31,7 @@
 
 import * as THREE from 'three';
 import { createFaceRig, applyFaceParams } from './face.js';
+import { buildFieldMesh } from './field.js';
 
 // ---------------------------------------------------------------------------
 // GENOME_SCHEMA
@@ -531,54 +532,95 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const dragon = new THREE.Group();
   dragon.name = 'dragon';
 
-  // ---- BODY (spine + tail capsule chain + belly) --------------------------
-  const body = new THREE.Group();
-  body.name = 'body';
-  for (const b of bones) {
-    if (b.kind === 'body') renderBoneCapsule(body, b, mat);
-  }
-  // Belly patch: a lighter ellipsoid along the underside of the trunk.
-  {
-    const shoulder = byName['spine_06'].pos, hipB = byName['spine_20'].pos;
-    const mid = shoulder.clone().add(hipB).multiplyScalar(0.5);
-    const trunkLen = shoulder.distanceTo(hipB);
-    const midR = byName[`spine_${String(Math.round((SHOULDER_IDX + HIP_IDX) / 2)).padStart(2, '0')}`].envelopeRadius;
-    const belly = new THREE.Mesh(_unitSphere, bellyMat);
-    belly.name = 'belly';
-    belly.position.copy(mid).add(V(0, -midR * 0.45, 0));
-    belly.scale.set(midR * 0.82, midR * 0.6, trunkLen * 0.5);
-    body.add(belly);
-  }
-  dragon.add(body);
+  // Skin mode: 'smooth' = implicit-field + marching-cubes single mesh (default);
+  // 'capsule' = the Step-1 raw per-bone capsules (cheap fallback / comparison).
+  // Honors env.skinMode, falling back to a window.__skinMode global so the
+  // headless harness can flip modes without editing app.js (same pattern as
+  // window.__showRig).
+  const skinMode = env.skinMode
+    ?? (typeof window !== 'undefined' ? window.__skinMode : undefined)
+    ?? 'smooth';
 
-  // ---- HEAD (skull ellipsoid + snout + jaw + face rig) --------------------
-  const head = new THREE.Group();
-  head.name = 'head';
   const skull = byName['skull'];
   const R = skull.headR;
-  head.position.copy(skull.pos);
 
-  const skullMesh = new THREE.Mesh(_unitSphere, mat);
-  skullMesh.name = 'skull';
-  skullMesh.scale.set(R * 0.98, R * 0.92, R * 1.06);
-  skullMesh.castShadow = true;
-  head.add(skullMesh);
-
-  // snout + jaw rendered relative to the head group origin (= skull world pos).
-  const headWorld = head.position;
-  for (const nm of ['snout', 'jaw']) {
-    const b = byName[nm];
-    renderBoneCapsule(head, {
-      ...b, pos: b.pos.clone().sub(headWorld), tail: b.tail.clone().sub(headWorld),
-    }, mat);
+  if (skinMode === 'smooth') {
+    // ---- SMOOTH BODY: one convolution-field marching-cubes mesh -----------
+    // Volumetric bone kinds only; wings stay as spar capsules (thin sheets are
+    // the classic implicit-field failure, per the doc).
+    const fieldRes = env.fieldRes
+      ?? (typeof window !== 'undefined' ? window.__fieldRes : undefined) ?? 64;
+    const smoothK = env.smoothK
+      ?? (typeof window !== 'undefined' ? window.__fieldSmoothK : undefined);
+    const { geometry, stats } = buildFieldMesh(bones, {
+      fieldRes,
+      ...(smoothK !== undefined ? { smoothK } : {}),
+    });
+    const bodyMesh = new THREE.Mesh(geometry, mat);
+    bodyMesh.name = 'body';
+    bodyMesh.castShadow = true;
+    bodyMesh.receiveShadow = true;
+    dragon.add(bodyMesh);
+    dragon.userData.fieldStats = stats;
+    if (typeof console !== 'undefined') {
+      console.log(`[field] marching-cubes ${stats.grid.join('x')} grid, ${stats.envelopes} envelopes`
+        + ` -> ${stats.tris} tris / ${stats.verts} verts in ${stats.ms.toFixed(1)} ms`);
+    }
+  } else {
+    // ---- CAPSULE BODY (Step-1): spine + tail capsule chain + belly --------
+    const body = new THREE.Group();
+    body.name = 'body';
+    for (const b of bones) {
+      if (b.kind === 'body') renderBoneCapsule(body, b, mat);
+    }
+    // Belly patch: a lighter ellipsoid along the underside of the trunk.
+    {
+      const shoulder = byName['spine_06'].pos, hipB = byName['spine_20'].pos;
+      const mid = shoulder.clone().add(hipB).multiplyScalar(0.5);
+      const trunkLen = shoulder.distanceTo(hipB);
+      const midR = byName[`spine_${String(Math.round((SHOULDER_IDX + HIP_IDX) / 2)).padStart(2, '0')}`].envelopeRadius;
+      const belly = new THREE.Mesh(_unitSphere, bellyMat);
+      belly.name = 'belly';
+      belly.position.copy(mid).add(V(0, -midR * 0.45, 0));
+      belly.scale.set(midR * 0.82, midR * 0.6, trunkLen * 0.5);
+      body.add(belly);
+    }
+    dragon.add(body);
   }
 
-  // Reusable face rig (unchanged face.js) sized to the skull radius.
+  // ---- HEAD group: face rig always layered ON TOP, at the skull position ---
+  // The eyes+brows stay SEPARATE objects over the head so they never get
+  // swallowed by the implicit field. In capsule mode the head also renders the
+  // skull/snout/jaw meshes; in smooth mode those are part of the field body.
+  const head = new THREE.Group();
+  head.name = 'head';
+  head.position.copy(skull.pos);
+
+  if (skinMode !== 'smooth') {
+    const skullMesh = new THREE.Mesh(_unitSphere, mat);
+    skullMesh.name = 'skull';
+    skullMesh.scale.set(R * 0.98, R * 0.92, R * 1.06);
+    skullMesh.castShadow = true;
+    head.add(skullMesh);
+
+    // snout + jaw rendered relative to the head group origin (= skull world pos).
+    const headWorld = head.position;
+    for (const nm of ['snout', 'jaw']) {
+      const b = byName[nm];
+      renderBoneCapsule(head, {
+        ...b, pos: b.pos.clone().sub(headWorld), tail: b.tail.clone().sub(headWorld),
+      }, mat);
+    }
+  }
+
+  // Reusable face rig (unchanged face.js) sized to the skull radius. In smooth
+  // mode we nudge it slightly forward/out so it sits ON the smooth head surface
+  // (the field skull is a plain sphere of radius R).
   const face = createFaceRig(p.face, {
     headRadius: R,
     eyeSize: p.eyeSize * R * 0.42,
     eyeHeight: p.eyeHeight,
-    eyeForward: p.eyeFwd,
+    eyeForward: skinMode === 'smooth' ? Math.min(0.95, p.eyeFwd + 0.06) : p.eyeFwd,
   });
   face.name = 'faceRig';
   head.add(face);
@@ -586,17 +628,19 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   head.userData.headRadius = R;
   dragon.add(head);
 
-  // ---- LIMBS (fore/hind legs + girdles) -----------------------------------
-  const limbs = new THREE.Group();
-  limbs.name = 'limbs';
-  for (const b of bones) {
-    if (b.kind === 'limb' || b.kind === 'foot' || b.kind === 'girdle') {
-      renderBoneCapsule(limbs, b, mat);
+  // ---- LIMBS (capsule mode only; smooth mode limbs live in the field) -----
+  if (skinMode !== 'smooth') {
+    const limbs = new THREE.Group();
+    limbs.name = 'limbs';
+    for (const b of bones) {
+      if (b.kind === 'limb' || b.kind === 'foot' || b.kind === 'girdle') {
+        renderBoneCapsule(limbs, b, mat);
+      }
     }
+    dragon.add(limbs);
   }
-  dragon.add(limbs);
 
-  // ---- WINGS (spar chains) ------------------------------------------------
+  // ---- WINGS (spar chains) — both modes -----------------------------------
   const wings = new THREE.Group();
   wings.name = 'wings';
   for (const b of bones) {
@@ -620,7 +664,10 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   dragon.scale.setScalar(p.globalScale);
   dragon.position.y = -lowest * p.globalScale;
 
-  dragon.userData = { genome: { ...genome }, age, env, phenotype: p, skeleton: bones };
+  dragon.userData = {
+    genome: { ...genome }, age, env, phenotype: p, skeleton: bones,
+    skinMode, fieldStats: dragon.userData.fieldStats,
+  };
   return dragon;
 }
 
