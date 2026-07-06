@@ -26,11 +26,16 @@
 - [x] Headless render/eval harness (`testbed/tools/render.mjs`) — drives the page in headless Chrome, scrubs age, auto-frames, writes PNGs. Canonical eval path (Chrome extension not required).
 - [x] Eval loop proven: page → render → Claude Read + `tools/grok.sh eval`. First eval in `design/testbed-eval-01.md`.
 - [x] Cute→cool arc verified on the placeholder (age slider drives a real transformation).
-- [ ] **Real generator:** replace placeholder internals with skeleton + tagged attachment slots + allometric growth curves (from `design/architecture-synthesis.md`). Build order: skeleton + per-bone skin w/ age → tube/L-system horns & wings → face sub-rig → markings.
-- [ ] **Resolve the skin tension:** implement dual skin modes (box-per-bone cuboid vs tapered/smoothed) and compare with human + grok-vision feedback.
-- [ ] Work the P0/P1 defect backlog in `design/testbed-eval-01.md` (floating baby horns, cross-eyed pupils, larval body, flat wings, tube snout).
-- [ ] Genome crossover control (breed two genomes → offspring) to test breeding early.
-- [ ] `geo.json` export path (alongside glTF) to keep the Minecraft bridge honest.
+- Rigging + skinning decided → `design/rigging-and-skinning-recommendation.md`: ONE fixed-topology skeleton (stable bone names; genome+age only scale bone length + envelope radius), primitive-envelope surface feeding an implicit field with TWO backends (marching-cubes smooth for testbed, greedy-voxelized cuboids for MC/geo.json), weights free via field-softmax (no Pinocchio/BBW). Skin tension dissolved: cuboids get an organic silhouette from the field.
+- Body plans = **parametric-emergent** (DECIDED): limbs/wings/neck/body are continuous traits; snake/wyvern/quadruped/eastern are attractor presets. Snake-origin growth: limb budding = envelope radius rising from ~0 with age.
+
+  **Build order (autonomous, in progress):**
+  - [~] **Step 1** — fixed-topology skeleton + allometric growth, raw per-bone capsules, parametric-emergent genome, 4 archetypes. (`step1-skeleton` worktree.)
+  - [ ] **Gallery** — `testbed/tools/gallery.mjs`: age strip, variation grid, mutation tree (pose sheet deferred to posing). See `design/gallery-spec.md`.
+  - [ ] **Step 2** — implicit field + marching-cubes smooth backend + field-softmax weights.
+  - [ ] **Step 3** — voxelized-cuboid backend + `geo.json` export + cuboid-vs-smooth cuteness eval.
+- [ ] Work the P0/P1 defect backlog in `design/testbed-eval-01.md` (should be largely obsoleted by the skeleton rebuild).
+- [ ] Genome crossover control (breed two genomes → offspring) — mutation tree gallery is a first step.
 - [ ] Human-feedback loop to tune parameters/rules.
 
 ## Phase 3 — Generate & tune
