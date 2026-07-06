@@ -21,6 +21,16 @@ let age = 0.0;
 let currentDragon = null;
 let rebuildTimer = null;
 
+// Skin/view settings live on window.__* so the headless tools (render.mjs /
+// gallery.mjs) can poke them and call regenerate. The UI controls below write
+// these globals before rebuilding; rebuild() reads them back into an explicit
+// env, so an external set (e.g. render.mjs --skinmode voxel) still wins.
+if (typeof window !== 'undefined') {
+  window.__skinMode ??= 'smooth';
+  window.__voxelRes ??= 24;
+  window.__showRig ??= false;
+}
+
 // ---------------------------------------------------------------------------
 // Scene setup
 // ---------------------------------------------------------------------------
@@ -88,7 +98,12 @@ function disposeDragon(obj) {
 }
 
 function rebuild() {
-  const next = generateDragon(genome, age, {});
+  const env = {
+    skinMode: window.__skinMode ?? 'smooth',
+    voxelRes: window.__voxelRes ?? 24,
+    showRig: window.__showRig ?? false,
+  };
+  const next = generateDragon(genome, age, env);
   scene.remove(currentDragon);
   disposeDragon(currentDragon);
   currentDragon = next;
@@ -210,12 +225,19 @@ ageInput.addEventListener('input', () => {
 // ---------------------------------------------------------------------------
 // Buttons + emotion dropdown
 // ---------------------------------------------------------------------------
-document.getElementById('btnRandom').addEventListener('click', () => {
+// Fully randomize a genome (shared by the Randomize button + Variation gallery).
+function randomGenome() {
+  const g = {};
   for (const t of GENOME_SCHEMA) {
-    // leave pupil gaze centered-ish so faces don't look cross-eyed randomly
     const v = t.min + Math.random() * (t.max - t.min);
-    genome[t.name] = (t.step === 1) ? Math.round(v) : v;
+    g[t.name] = (t.step === 1) ? Math.round(v) : v;
   }
+  return g;
+}
+
+document.getElementById('btnRandom').addEventListener('click', () => {
+  genome = randomGenome();
+  setArchetypeCustom();
   syncSliders();
   rebuild();
 });
@@ -225,6 +247,7 @@ document.getElementById('btnReset').addEventListener('click', () => {
   age = 0.0;
   ageInput.value = '0';
   ageVal.textContent = '0.00';
+  setArchetypeCustom();
   syncSliders();
   rebuild();
 });
@@ -244,6 +267,193 @@ emotionSel.addEventListener('change', () => {
   syncSliders();
   applyLiveFace();
   updateReadout();
+});
+
+// ---------------------------------------------------------------------------
+// Skin & View controls (skin mode / voxel res / show rig / archetype / geo.json)
+// ---------------------------------------------------------------------------
+const skinModeSel = document.getElementById('skinMode');
+const voxelResEl = document.getElementById('voxelRes');
+const voxelResVal = document.getElementById('voxelResVal');
+const voxelResRow = document.getElementById('voxelResRow');
+const showRigEl = document.getElementById('showRig');
+const archetypeSel = document.getElementById('archetype');
+
+function setArchetypeCustom() { archetypeSel.value = 'custom'; }
+
+// Voxel res only matters in voxel mode — dim + disable it otherwise (kept in DOM).
+function syncVoxelResEnabled() {
+  const isVoxel = skinModeSel.value === 'voxel';
+  voxelResRow.classList.toggle('dim', !isVoxel);
+  voxelResEl.disabled = !isVoxel;
+}
+
+// Initialize the controls from the (possibly headless-preset) globals.
+skinModeSel.value = window.__skinMode;
+voxelResEl.value = String(window.__voxelRes);
+voxelResVal.textContent = String(window.__voxelRes);
+showRigEl.checked = !!window.__showRig;
+syncVoxelResEnabled();
+
+skinModeSel.addEventListener('change', () => {
+  window.__skinMode = skinModeSel.value;
+  syncVoxelResEnabled();
+  rebuild();
+});
+voxelResEl.addEventListener('input', () => {
+  window.__voxelRes = parseInt(voxelResEl.value, 10);
+  voxelResVal.textContent = voxelResEl.value;
+  scheduleRebuild();
+});
+showRigEl.addEventListener('change', () => {
+  window.__showRig = showRigEl.checked;
+  rebuild();
+});
+archetypeSel.addEventListener('change', () => {
+  const name = archetypeSel.value;
+  if (name === 'custom') return;
+  const src = window.__ARCHETYPES && window.__ARCHETYPES[name];
+  if (!src) return;
+  genome = { ...src };
+  syncSliders();
+  rebuild();
+});
+document.getElementById('btnExportGeo').addEventListener('click', () => {
+  const t = window.__testbed;
+  if (!t || !t.exportGeoJSON) { console.warn('exportGeoJSON not ready yet'); return; }
+  const json = t.exportGeoJSON();
+  downloadBlob(new Blob([json], { type: 'application/json' }),
+    `dragon_age${age.toFixed(2)}.geo.json`);
+});
+
+// ---------------------------------------------------------------------------
+// In-browser gallery — reuse the single renderer to shoot thumbnail grids.
+// ---------------------------------------------------------------------------
+const galleryEl = document.getElementById('gallery');
+const galleryGrid = document.getElementById('galleryGrid');
+const galleryTitle = document.getElementById('galleryTitle');
+const galleryStatus = document.getElementById('galleryStatus');
+let galleryBusy = false;
+
+// Frame an object with a Box3 fit (same 3/4-front framing render.mjs uses).
+function frameObject(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+  const fov = camera.fov * Math.PI / 180;
+  const dist = (radius / Math.sin(fov / 2)) * 1.15;
+  const dir = new THREE.Vector3(0.55, 0.35, 1).normalize();
+  camera.position.copy(center.clone().add(dir.multiplyScalar(dist)));
+  camera.near = dist / 100; camera.far = dist * 100;
+  camera.lookAt(center); camera.updateProjectionMatrix();
+  controls.target.copy(center);
+}
+
+// Jitter every trait by ±amt*(range), clamped to [min,max] (breeding mutation).
+function jitterGenome(parent, amt = 0.2) {
+  const child = { ...parent };
+  for (const t of GENOME_SCHEMA) {
+    let v = parent[t.name] + (Math.random() * 2 - 1) * amt * (t.max - t.min);
+    v = Math.max(t.min, Math.min(t.max, v));
+    child[t.name] = (t.step === 1) ? Math.round(v) : v;
+  }
+  return child;
+}
+
+function closeGallery() {
+  galleryEl.style.display = 'none';
+  galleryGrid.innerHTML = '';
+}
+document.getElementById('galleryClose').addEventListener('click', closeGallery);
+
+// rows: array of rows; each row is an array of { genome, age, caption }.
+async function runGallery(title, rows) {
+  if (galleryBusy) return;
+  galleryBusy = true;
+  galleryTitle.firstChild.textContent = title + ' ';
+  galleryStatus.textContent = 'rendering…';
+  galleryEl.style.display = 'flex';
+  galleryGrid.innerHTML = '';
+
+  // Build the cell shells first so the grid + captions paint immediately.
+  const jobs = [];
+  for (const row of rows) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'galRow';
+    for (const cell of row) {
+      const fig = document.createElement('figure');
+      fig.className = 'galCell';
+      const img = document.createElement('img');
+      const cap = document.createElement('figcaption');
+      cap.textContent = cell.caption;
+      fig.append(img, cap);
+      rowEl.appendChild(fig);
+      jobs.push({ img, cell });
+    }
+    galleryGrid.appendChild(rowEl);
+  }
+
+  // Save camera/controls state and hide the main dragon while we shoot cells.
+  const savedPos = camera.position.clone();
+  const savedTarget = controls.target.clone();
+  const savedNear = camera.near, savedFar = camera.far;
+  const mainDragon = currentDragon;
+  if (mainDragon) mainDragon.visible = false;
+
+  const env = {
+    skinMode: window.__skinMode ?? 'smooth',
+    voxelRes: window.__voxelRes ?? 24,
+    showRig: window.__showRig ?? false,
+  };
+
+  let done = 0;
+  for (const { img, cell } of jobs) {
+    // Yield a frame so the overlay + progress paint between cells.
+    await new Promise((r) => requestAnimationFrame(r));
+    if (galleryEl.style.display === 'none') break; // closed mid-run
+    const d = generateDragon(cell.genome, cell.age, env);
+    scene.add(d);
+    frameObject(d);
+    renderer.render(scene, camera);
+    img.src = canvas.toDataURL('image/png');
+    scene.remove(d);
+    disposeDragon(d);
+    galleryStatus.textContent = `rendering… ${++done}/${jobs.length}`;
+  }
+
+  // Restore the main dragon + camera/controls state.
+  if (mainDragon) mainDragon.visible = true;
+  camera.position.copy(savedPos);
+  camera.near = savedNear; camera.far = savedFar;
+  camera.updateProjectionMatrix();
+  controls.target.copy(savedTarget);
+  controls.update();
+  galleryStatus.textContent = '';
+  galleryBusy = false;
+}
+
+document.getElementById('btnGalAge').addEventListener('click', () => {
+  const ages = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  const row = ages.map((a) => ({ genome: { ...genome }, age: a, caption: `age ${a}` }));
+  runGallery('Age strip', [row]);
+});
+document.getElementById('btnGalVar').addEventListener('click', () => {
+  const cells = [];
+  for (let i = 0; i < 9; i++) {
+    cells.push({ genome: randomGenome(), age: 1, caption: `#${i + 1}` });
+  }
+  runGallery('Variation', [cells.slice(0, 3), cells.slice(3, 6), cells.slice(6, 9)]);
+});
+document.getElementById('btnGalTree').addEventListener('click', () => {
+  const root = { ...genome };
+  const gen1 = [0, 1, 2].map(() => jitterGenome(root));
+  const gen2 = gen1.flatMap((p) => [0, 1, 2].map(() => jitterGenome(p)));
+  runGallery('Breeding tree', [
+    [{ genome: root, age: 1, caption: 'root' }],
+    gen1.map((g, i) => ({ genome: g, age: 1, caption: `gen1.${i + 1}` })),
+    gen2.map((g, i) => ({ genome: g, age: 1, caption: `gen2.${i + 1}` })),
+  ]);
 });
 
 // ---------------------------------------------------------------------------
