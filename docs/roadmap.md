@@ -29,14 +29,19 @@
 - Rigging + skinning decided → `design/rigging-and-skinning-recommendation.md`: ONE fixed-topology skeleton (stable bone names; genome+age only scale bone length + envelope radius), primitive-envelope surface feeding an implicit field with TWO backends (marching-cubes smooth for testbed, greedy-voxelized cuboids for MC/geo.json), weights free via field-softmax (no Pinocchio/BBW). Skin tension dissolved: cuboids get an organic silhouette from the field.
 - Body plans = **parametric-emergent** (DECIDED): limbs/wings/neck/body are continuous traits; snake/wyvern/quadruped/eastern are attractor presets. Snake-origin growth: limb budding = envelope radius rising from ~0 with age.
 
-  **Build order (autonomous, in progress):**
-  - [~] **Step 1** — fixed-topology skeleton + allometric growth, raw per-bone capsules, parametric-emergent genome, 4 archetypes. (`step1-skeleton` worktree.)
-  - [ ] **Gallery** — `testbed/tools/gallery.mjs`: age strip, variation grid, mutation tree (pose sheet deferred to posing). See `design/gallery-spec.md`.
-  - [ ] **Step 2** — implicit field + marching-cubes smooth backend + field-softmax weights.
-  - [ ] **Step 3** — voxelized-cuboid backend + `geo.json` export + cuboid-vs-smooth cuteness eval.
-- [ ] Work the P0/P1 defect backlog in `design/testbed-eval-01.md` (should be largely obsoleted by the skeleton rebuild).
-- [ ] Genome crossover control (breed two genomes → offspring) — mutation tree gallery is a first step.
-- [ ] Human-feedback loop to tune parameters/rules.
+  **Build order (autonomous) — DONE:**
+  - [x] **Step 1** — fixed-topology 59-bone skeleton + allometric growth, raw capsules, parametric-emergent genome, 4 archetypes.
+  - [x] **Gallery** — `testbed/tools/gallery.mjs`: age strip, variation grid, mutation tree (pose sheet stubbed → wire now that weights exist). See `design/gallery-spec.md`.
+  - [x] **Step 2** — implicit field (smooth-min of per-bone capsules) + marching cubes + field-softmax skin weights (standard `skinIndex`/`skinWeight`). Fixes the "larval" body.
+  - [x] **Step 3** — voxelized-cuboid backend + Bedrock `geo.json` export (validated GeckoLib model, `testbed/samples/`). Skin tension resolved: field-rounded cuboids are MC-native and recognizable.
+  - Evaluations: `design/testbed-eval-02.md` (Steps 1–2), smooth-vs-voxel comparison confirms the cuboid path is shippable for MC.
+
+## Phase 2.5 — Tuning & polish (next)
+- [ ] **Cross-validated tuning backlog** (`design/testbed-eval-02.md`): P0 brows→soft arched shapes; P1 add mouth/jaw line; P1 clamp `robustness` beach-balls; facets; hind-leg absorption (`smoothK`); voxel warty underside; square-viewport framing.
+- [ ] **Wire the pose-sheet gallery** — weights now exist; add a pose API + `poses` gallery mode to evaluate the rig under motion.
+- [ ] **Wing membranes** (spar sheets), then CA-placed spikes/ridges + reaction-diffusion coloration (per user direction).
+- [ ] Genome crossover control (breed two genomes → egg/baby) — mutation tree is the first step.
+- [ ] Human-in-the-loop tuning pass with the galleries.
 
 ## Phase 3 — Generate & tune
 - Produce candidate dragons across the trait space.
