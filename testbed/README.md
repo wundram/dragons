@@ -178,6 +178,29 @@ renderer, regenerate }` for scripted / headless verification.
 
 ---
 
+## Gallery (headless contact sheets)
+
+`tools/gallery.mjs` renders montaged PNG contact sheets for visual evaluation
+(spec: `design/gallery-spec.md`). It drives the live page in headless Chrome
+like `tools/render.mjs`, screenshots only the canvas, and composites with
+ImageMagick. Serve the testbed first (`python3 -m http.server 8000 --directory
+testbed`; pass `--url` if you use another port), then from `testbed/tools/`:
+
+```bash
+node gallery.mjs age       --archetype wyvern --ages 0,0.2,0.4,0.6,0.8,1   # one genome aging (strip)
+node gallery.mjs variation --mode sweep  --trait neckLength --n 12 --age 1 # one trait min→max (grid)
+node gallery.mjs variation --mode random --subset body,head --n 12 --seed 7 # randomized genomes (grid)
+node gallery.mjs tree      --root wyvern --fanout 3 --depth 2 --jitter 0.2 # mutation tree (tiers)
+node gallery.mjs poses     --genome '{}'   # stub — waits on the Step 2 pose API
+```
+
+Genomes come from `--genome '<json>'` or `--archetype snake|wyvern|quadruped|eastern`.
+Random/tree modes are deterministic from `--seed` + cell index. Grids are capped
+at 16 cells. Sheets land in `out/gallery/` (gitignored, like all of `out/`);
+the final sheet path(s) are printed as the last line(s) for scripted evaluation.
+
+---
+
 ## Files
 
 | File | What it is |
@@ -186,4 +209,6 @@ renderer, regenerate }` for scripted / headless verification.
 | `src/app.js` | The harness: scene, lights, OrbitControls, auto-built panel, buttons, export. Talks to the generator only via the contract. |
 | `src/generator.js` | **Interface contract** + placeholder generator (`GENOME_SCHEMA`, `DEFAULT_GENOME`, `generateDragon`, `phenotype`). |
 | `src/face.js` | Reusable, scalable eye+brow face rig + emotion presets. |
-| `out/` | Rendered PNG/glTF output (gitignored). |
+| `tools/render.mjs` | Headless Chrome render harness (single shots across ages). |
+| `tools/gallery.mjs` | Headless gallery generator — montaged contact sheets (age / variation / tree; poses stubbed). |
+| `out/` | Rendered PNG/glTF output (gitignored). Gallery sheets go to `out/gallery/`. |
