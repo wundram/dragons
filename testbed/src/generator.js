@@ -22,7 +22,10 @@
 //
 // Additional exports used by the harness / evaluation:
 //   - FACE_TRAITS, setDragonFace, phenotype   (unchanged contract)
-//   - ARCHETYPES : { snake, wyvern, quadruped, eastern }  — attractor genomes
+//   - ARCHETYPES : { snake, drake, wyvern, crawlerFlyer, grasper, ... } — attractor
+//     genomes remapped onto the unified bat-wing-forelimb case table (see
+//     design/limb-and-wing-architecture.md). (quadruped/eastern kept as aliases
+//     so the harness's hard-coded archetype <select> still resolves.)
 //
 // The returned group exposes the resolved bone tree on
 // `group.userData.skeleton` (array of { name, parent, pos, length,
@@ -71,21 +74,36 @@ export const GENOME_SCHEMA = [
   { name: 'eyeSize',     min: 0.5, max: 1.8, default: 1.0, group: 'Head',
     description: 'Base eye size. Babies get huge low eyes; adults smaller & higher.' },
 
-  // --- Limbs (development gates the whole limb; 0 = that limb never appears) --
-  { name: 'foreLimbDev',  min: 0.0, max: 1.0, default: 1.0, group: 'Limbs',
-    description: 'Front-limb development. 0 = no forelimbs at any age (snake/wyvern), 1 = full.' },
-  { name: 'hindLimbDev',  min: 0.0, max: 1.0, default: 1.0, group: 'Limbs',
-    description: 'Hind-limb development. 0 = no hind legs at any age (snake), 1 = full.' },
-  { name: 'limbLength',   min: 0.4, max: 1.8, default: 1.0, group: 'Limbs',
-    description: 'Adult limb length (baby limbs bud short & stubby, lengthen with age).' },
-  { name: 'limbThickness',min: 0.5, max: 1.8, default: 1.0, group: 'Limbs',
-    description: 'Limb envelope radius. Babies get chubbier limbs automatically.' },
+  // --- Forelimb (the UNIFIED bat-wing forelimb — ONE fixed topology; bone
+  //     lengths alone decide arm vs wing vs hand. length ~0 => that part absent) -
+  { name: 'armLength',    min: 0.0, max: 1.8, default: 1.0, group: 'Forelimb',
+    description: 'Shoulder->wrist reach (upper arm + forearm). ~0 = no arm (snake); long+no-membrane = a walking foreleg.' },
+  { name: 'finger0Length',min: 0.0, max: 2.4, default: 1.0, group: 'Forelimb',
+    description: 'Primary finger / main wing spar (the leading edge beyond the wrist). Long = wing spar, short = finger.' },
+  { name: 'finger1Length',min: 0.0, max: 2.0, default: 0.6, group: 'Forelimb',
+    description: 'Second finger. Short => toe/claw, long => extra wing spar (another membrane panel).' },
+  { name: 'finger2Length',min: 0.0, max: 2.0, default: 0.5, group: 'Forelimb',
+    description: 'Third finger. Short => toe/claw, long => extra wing spar.' },
+  { name: 'finger3Length',min: 0.0, max: 2.0, default: 0.4, group: 'Forelimb',
+    description: 'Fourth finger. Short => toe/claw, long => extra wing spar.' },
+  { name: 'fingerSpread', min: 0.0, max: 1.0, default: 0.5, group: 'Forelimb',
+    description: 'Fan splay of the fingers (wing chord width / hand spread).' },
+  { name: 'foreClawSize', min: 0.0, max: 1.5, default: 0.6, group: 'Forelimb',
+    description: 'Talon size at the fingertips.' },
+  { name: 'limbThickness',min: 0.5, max: 1.8, default: 1.0, group: 'Forelimb',
+    description: 'Arm/leg envelope radius. Babies get chubbier limbs automatically.' },
 
-  // --- Wings ----------------------------------------------------------------
-  { name: 'wingDev',  min: 0.0, max: 1.0, default: 1.0, group: 'Wings',
-    description: 'Wing development. 0 = wingless at any age (snake/some quadrupeds), 1 = full.' },
-  { name: 'wingSize', min: 0.4, max: 2.2, default: 1.0, group: 'Wings',
-    description: 'Adult wing spar span. Absent on babies, buds/emerges past ~25% age.' },
+  // --- Wings (membrane amount over the SAME forelimb — no separate limb pair) --
+  { name: 'wingMembrane', min: 0.0, max: 1.0, default: 0.6, group: 'Wings',
+    description: 'Membrane sheet spanning the forelimb: 0 = bare arm/leg, low = leading-edge fringe, 1 = full bat wing. Also drives the wing-out rest pose. Emerges past ~25% age.' },
+
+  // --- Hind limbs (legs ending in toed feet with claws) ---------------------
+  { name: 'hindLegLength',min: 0.0, max: 1.8, default: 1.0, group: 'Hind',
+    description: 'Hind leg length. ~0 = legless (snake). Babies bud short, lengthen with age.' },
+  { name: 'toeCount',     min: 0, max: 4, default: 3, step: 1, group: 'Hind',
+    description: 'How many toes on each hind foot are developed (0..4).' },
+  { name: 'hindClawSize', min: 0.0, max: 1.5, default: 0.6, group: 'Hind',
+    description: 'Talon size on the hind toes.' },
 
   // --- Growth (allometric rate biases; shape HOW the cute→cool arc travels) --
   { name: 'maturationRate', min: 0.4, max: 2.2, default: 1.0, group: 'Growth',
@@ -140,36 +158,78 @@ export const FACE_TRAITS = ['eyeOpen', 'pupilX', 'pupilY', 'browHeight', 'browAn
 function withDefaults(overrides) {
   return { ...DEFAULT_GENOME, ...overrides };
 }
+// Every archetype is a strict TETRAPOD (2 girdles, 4 limbs). The front pair is
+// EITHER a leg/hand OR a wing — never both — because both are the same forelimb;
+// the difference is only armLength / finger lengths / wingMembrane (the case
+// table in the spec). No archetype carries walking forelegs AND a separate wing.
 export const ARCHETYPES = {
-  // Snake: no limbs, no wings, very long body + neck + tail, slender.
+  // Snake: reduced front & back pair (lengths ~0), very long body/neck/tail.
   snake: withDefaults({
     bodyElongation: 2.3, robustness: 0.9, neckLength: 1.8, tailLength: 2.6,
     girdleWidth: 0.5, headSize: 0.9, snoutLength: 0.8, jawSize: 0.9,
-    foreLimbDev: 0.0, hindLimbDev: 0.0, wingDev: 0.0,
+    armLength: 0.0, finger0Length: 0.0, finger1Length: 0.0, finger2Length: 0.0,
+    finger3Length: 0.0, foreClawSize: 0.0, wingMembrane: 0.0,
+    hindLegLength: 0.0, toeCount: 0, hindClawSize: 0.0,
     colorHue: 0.32, colorSaturation: 0.65,
   }),
-  // Wyvern: no forelimbs, strong hind legs + big wings.
-  wyvern: withDefaults({
-    bodyElongation: 1.0, robustness: 1.0, neckLength: 1.2, tailLength: 1.6,
-    girdleWidth: 1.0, headSize: 1.05, snoutLength: 1.1, jawSize: 1.1,
-    foreLimbDev: 0.0, hindLimbDev: 1.0, limbLength: 1.15, limbThickness: 1.15,
-    wingDev: 1.0, wingSize: 1.5,
-    colorHue: 0.02, colorSaturation: 0.7,
-  }),
-  // Quadruped: four strong legs, medium wings, chunky.
-  quadruped: withDefaults({
+  // Drake (vestigial quadruped WALKER): forearm ≈ hind leg, short primary finger,
+  // other fingers present as toes/claws, fringe-only membrane, NO wings. A clawed
+  // four-legged walker.
+  drake: withDefaults({
     bodyElongation: 1.1, robustness: 1.3, neckLength: 1.0, tailLength: 1.3,
-    girdleWidth: 1.3, headSize: 1.1, snoutLength: 1.0, jawSize: 1.2,
-    foreLimbDev: 1.0, hindLimbDev: 1.0, limbLength: 1.1, limbThickness: 1.35,
-    wingDev: 0.5, wingSize: 1.0,
+    girdleWidth: 1.3, headSize: 1.1, snoutLength: 1.0, jawSize: 1.2, limbThickness: 1.3,
+    armLength: 1.1, finger0Length: 0.5, finger1Length: 0.55, finger2Length: 0.5,
+    finger3Length: 0.45, fingerSpread: 0.7, foreClawSize: 0.9, wingMembrane: 0.12,
+    hindLegLength: 1.1, toeCount: 3, hindClawSize: 0.9,
     colorHue: 0.6, colorSaturation: 0.6,
   }),
-  // Eastern / Chinese: extremely elongated body+neck+tail, small dainty limbs, no wings.
+  // Wyvern (BIPEDAL FLYER): short arm, long primary spar, a few short extra spars,
+  // full membrane => a real bat wing. Strong hind legs. The natural flyer.
+  wyvern: withDefaults({
+    bodyElongation: 1.0, robustness: 1.0, neckLength: 1.2, tailLength: 1.6,
+    girdleWidth: 1.0, headSize: 1.05, snoutLength: 1.1, jawSize: 1.1, limbThickness: 1.05,
+    armLength: 0.7, finger0Length: 2.0, finger1Length: 1.3, finger2Length: 1.0,
+    finger3Length: 0.7, fingerSpread: 0.85, foreClawSize: 0.5, wingMembrane: 1.0,
+    hindLegLength: 1.15, toeCount: 3, hindClawSize: 0.8,
+    colorHue: 0.02, colorSaturation: 0.7,
+  }),
+  // Crawler-flyer (bat/pterosaur plan): primary spar ≈ hind leg, full membrane,
+  // several extra spars. Rest pose holds the wing out (the knuckle-walk fold is
+  // deferred pose work).
+  crawlerFlyer: withDefaults({
+    bodyElongation: 1.15, robustness: 1.05, neckLength: 1.0, tailLength: 1.5,
+    girdleWidth: 1.1, headSize: 1.0, snoutLength: 0.9, jawSize: 1.0, limbThickness: 1.1,
+    armLength: 0.9, finger0Length: 1.7, finger1Length: 1.2, finger2Length: 1.0,
+    finger3Length: 0.85, fingerSpread: 0.9, foreClawSize: 0.7, wingMembrane: 1.0,
+    hindLegLength: 1.0, toeCount: 3, hindClawSize: 0.8,
+    colorHue: 0.75, colorSaturation: 0.55,
+  }),
+  // Grasper (T-rex arms): short arm, huge fingers, no membrane — clawed graspers.
+  grasper: withDefaults({
+    bodyElongation: 1.05, robustness: 1.15, neckLength: 1.0, tailLength: 1.3,
+    girdleWidth: 1.1, headSize: 1.15, snoutLength: 1.0, jawSize: 1.25, limbThickness: 1.1,
+    armLength: 0.6, finger0Length: 1.2, finger1Length: 1.1, finger2Length: 1.0,
+    finger3Length: 0.5, fingerSpread: 0.6, foreClawSize: 1.2, wingMembrane: 0.0,
+    hindLegLength: 1.15, toeCount: 3, hindClawSize: 1.0,
+    colorHue: 0.08, colorSaturation: 0.75,
+  }),
+  // --- aliases (kept so the harness's hard-coded <select> options resolve) ----
+  // Quadruped -> the drake walker.
+  quadruped: withDefaults({
+    bodyElongation: 1.1, robustness: 1.3, neckLength: 1.0, tailLength: 1.3,
+    girdleWidth: 1.3, headSize: 1.1, snoutLength: 1.0, jawSize: 1.2, limbThickness: 1.3,
+    armLength: 1.1, finger0Length: 0.5, finger1Length: 0.55, finger2Length: 0.5,
+    finger3Length: 0.45, fingerSpread: 0.7, foreClawSize: 0.9, wingMembrane: 0.12,
+    hindLegLength: 1.1, toeCount: 3, hindClawSize: 0.9,
+    colorHue: 0.6, colorSaturation: 0.6,
+  }),
+  // Eastern / Chinese: elongated, small dainty limbs, no wings (strict tetrapod).
   eastern: withDefaults({
     bodyElongation: 2.0, robustness: 0.95, neckLength: 2.0, tailLength: 2.4,
-    girdleWidth: 0.8, headSize: 1.1, snoutLength: 1.2, jawSize: 1.0,
-    foreLimbDev: 0.35, hindLimbDev: 0.35, limbLength: 0.7, limbThickness: 0.8,
-    wingDev: 0.0, wingSize: 0.6,
+    girdleWidth: 0.8, headSize: 1.1, snoutLength: 1.2, jawSize: 1.0, limbThickness: 0.8,
+    armLength: 0.6, finger0Length: 0.4, finger1Length: 0.4, finger2Length: 0.35,
+    finger3Length: 0.3, fingerSpread: 0.6, foreClawSize: 0.7, wingMembrane: 0.0,
+    hindLegLength: 0.6, toeCount: 3, hindClawSize: 0.7,
     colorHue: 0.11, colorSaturation: 0.8,
   }),
 };
@@ -199,9 +259,13 @@ const U = {
   headR:     0.72,   // base skull radius
   legUpper:  0.62,   // upper leg length
   legLower:  0.55,   // lower leg length
-  legR:      0.17,   // base limb envelope radius
+  legR:      0.17,   // base limb envelope radius (arms + legs)
   footR:     0.15,   // foot radius
-  wingSparR: 0.10,   // base wing spar radius
+  armUpper:  0.60,   // shoulder->elbow at armLength=1
+  armLower:  0.52,   // elbow->wrist at armLength=1
+  fingerBase:0.95,   // finger/spar length at fingerXLength=1
+  fingerR:   0.055,  // base finger phalanx radius
+  toeBase:   0.30,   // hind toe length at hindLegLength=1
 };
 
 const SHOULDER_IDX = 6;   // trunk vertebra the shoulder girdle / forelimbs hang from
@@ -227,9 +291,9 @@ export function phenotype(genome, age = 0, env = {}) {
   const sizeBoost = env.sizeBoost ?? 1.0;
   const hueShift  = env.hueShift ?? 0.0;
 
-  // Allometric limb/wing budding. Radius & length rise from ~0 with age, gated by
-  // the *Dev trait so dev=0 => that limb NEVER appears at any age (snake stays
-  // limbless, wyvern buds only hind legs + wings). limbGrowthRate biases timing.
+  // Allometric limb/wing budding. Radius & length rise from ~0 with age. A part
+  // whose genome length is ~0 stays visually absent at every age (snake stays
+  // limbless); membrane emerges past ~25% age. limbGrowthRate biases timing.
   const budAge = clamp01(Math.pow(e, 1 / Math.max(0.2, g.limbGrowthRate)));
   const legGrow  = lerp(0.10, 1.0, smoothstep(budAge));           // legs: tiny stub -> full
   const wingGrow = smoothstep(clamp01((budAge - 0.22) / 0.72));   // wings: truly 0 young -> emerge
@@ -256,16 +320,24 @@ export function phenotype(genome, age = 0, env = {}) {
     // girth: babies rounder relative to length; leaner with age
     girth:     g.robustness * lerp(1.28, 1.0, s),
 
-    // --- limbs / wings (budding) ---
-    foreDev: g.foreLimbDev,
-    hindDev: g.hindLimbDev,
-    wingDev: g.wingDev,
+    // --- unified bat-wing forelimb (per-side; mirrored) ---
+    armLength:     g.armLength,
+    finger0Length: g.finger0Length,
+    finger1Length: g.finger1Length,
+    finger2Length: g.finger2Length,
+    finger3Length: g.finger3Length,
+    fingerSpread:  g.fingerSpread,
+    foreClaw:      g.foreClawSize,
+    wingMembrane:  g.wingMembrane,
+    // --- hind limbs ---
+    hindLegLength: g.hindLegLength,
+    toeCount:      g.toeCount,
+    hindClaw:      g.hindClawSize,
+    // --- budding factors ---
     budLegLen:  legGrow,
     budLegRad:  lerp(0.14, 1.0, smoothstep(budAge)),
     budWing:    wingGrow,
-    limbLen:    g.limbLength,
     limbThick:  g.limbThickness * lerp(1.4, 0.9, s), // chubby young -> lean adult
-    wingSize:   g.wingSize,
 
     // --- color: pastel baby -> saturated adult ---
     hue:   (g.colorHue + hueShift + 1) % 1,
@@ -396,74 +468,166 @@ function buildSkeleton(p) {
         envelopeRadius: R * 0.30 * p.jawSize, rTail: R * 0.16 * p.jawSize,
         length: snoutLen * 0.85, kind: 'body' });
 
-  // ---- girdles + limbs ----------------------------------------------------
-  // A limb's envelope radius/length are gated by its *Dev * budding factor, so
-  // dev=0 => radius 0 => the whole limb is skipped by the renderer & field.
-  const buildLeg = (side, front) => {
-    const idx = front ? SHOULDER_IDX : HIP_IDX;
-    const dev = front ? p.foreDev : p.hindDev;
-    const anchor = P[idx];
-    const torsoR = RAD[idx];
-    const budR = dev * p.budLegRad;   // radius factor
-    const budL = dev * p.budLegLen;   // length factor
-    const legR = U.legR * p.limbThick * budR;
-    const upperLen = U.legUpper * p.limbLen * budL;
-    const lowerLen = U.legLower * p.limbLen * budL;
-    const footFwd = 0.24 * p.limbLen * budL;
-
-    const socket = anchor.clone().add(V(side * torsoR * 0.9 * p.girdle, -torsoR * 0.15, 0));
-    const knee = socket.clone().add(V(side * 0.06, -upperLen, 0.04));
-    const ankle = knee.clone().add(V(-side * 0.02, -lowerLen, 0.06));
-    const toe = ankle.clone().add(V(0, -U.footR * budR * 0.4, footFwd + U.footR * budR));
-
-    const tag = (front ? 'fore' : 'hind') + (side < 0 ? 'L' : 'R');
-    const girdleName = front ? 'shoulderGirdle' : 'hipGirdle';
-    add({ name: `${tag}_upper`, parent: girdleName, pos: socket, tail: knee,
-          envelopeRadius: legR, rTail: legR * 0.82, length: upperLen, kind: 'limb' });
-    add({ name: `${tag}_lower`, parent: `${tag}_upper`, pos: knee, tail: ankle,
-          envelopeRadius: legR * 0.82, rTail: legR * 0.7, length: lowerLen, kind: 'limb' });
-    add({ name: `${tag}_foot`, parent: `${tag}_lower`, pos: ankle, tail: toe,
-          envelopeRadius: legR * 0.75, rTail: U.footR * budR, length: footFwd, kind: 'foot',
-          footY: toe.y - U.footR * budR });
-  };
-
-  // Girdles are transverse bars linking the two sockets; gated by limb dev so a
-  // limbless snake shows no girdle bar.
-  const addGirdle = (name, idx, dev) => {
+  // ---- girdles ------------------------------------------------------------
+  // Transverse bars linking the two sockets; radius gated by limb presence so a
+  // limbless snake shows no girdle bar (but the bone is ALWAYS emitted).
+  const addGirdle = (name, idx, present) => {
     const anchor = P[idx];
     const torsoR = RAD[idx];
     const half = torsoR * 0.9 * p.girdle;
-    const r = (dev > EPS) ? torsoR * 0.35 : 0;
+    const r = (present > EPS) ? torsoR * 0.35 : 0;
     add({ name, parent: idx < 12 ? spineName(SHOULDER_IDX) : spineName(HIP_IDX),
           pos: anchor.clone().add(V(-half, -torsoR * 0.15, 0)),
           tail: anchor.clone().add(V(half, -torsoR * 0.15, 0)), envelopeRadius: r, rTail: r,
           length: 2 * half, kind: 'girdle' });
   };
-  addGirdle('shoulderGirdle', SHOULDER_IDX, p.foreDev);
-  addGirdle('hipGirdle', HIP_IDX, p.hindDev);
-  for (const side of [-1, 1]) { buildLeg(side, true); buildLeg(side, false); }
+  addGirdle('shoulderGirdle', SHOULDER_IDX, p.armLength * p.budLegLen);
+  addGirdle('hipGirdle', HIP_IDX, p.hindLegLength * p.budLegLen);
 
-  // ---- wings: spar chains from the upper back near the shoulders ----------
-  const buildWing = (side) => {
-    const dev = p.wingDev;
-    const bud = dev * p.budWing;
-    const sparR = U.wingSparR * bud;
-    const span = p.wingSize * bud;
-    const root = P[SHOULDER_IDX].clone().add(V(side * RAD[SHOULDER_IDX] * 0.5, RAD[SHOULDER_IDX] * 0.75, 0));
-    const p1 = root.clone().add(V(side * 0.55 * span, 0.65 * span, -0.15 * span));
-    const p2 = p1.clone().add(V(side * 0.85 * span, 0.30 * span, -0.5 * span));
-    const tip = p2.clone().add(V(side * 0.7 * span, -0.05 * span, -0.6 * span));
-    const tag = 'wing' + (side < 0 ? 'L' : 'R');
-    add({ name: `${tag}_00`, parent: spineName(SHOULDER_IDX), pos: root, tail: p1,
-          envelopeRadius: sparR, rTail: sparR * 0.85, length: root.distanceTo(p1), kind: 'wing' });
-    add({ name: `${tag}_01`, parent: `${tag}_00`, pos: p1, tail: p2,
-          envelopeRadius: sparR * 0.85, rTail: sparR * 0.7, length: p1.distanceTo(p2), kind: 'wing' });
-    add({ name: `${tag}_02`, parent: `${tag}_01`, pos: p2, tail: tip,
-          envelopeRadius: sparR * 0.7, rTail: sparR * 0.45, length: p2.distanceTo(tip), kind: 'wing' });
+  // small vector helpers
+  const nrm = (v) => v.clone().normalize();
+  const mixV = (a, b, t) => a.clone().multiplyScalar(1 - t).add(b.clone().multiplyScalar(t));
+  const seg2 = (n) => String(n).padStart(2, '0');
+
+  const budR = p.budLegRad;
+  const budL = p.budLegLen;
+  const limbR = U.legR * p.limbThick * budR;   // shared arm/leg radius
+
+  // ---- UNIFIED BAT-WING FORELIMB (per side) -------------------------------
+  // Fixed topology:  shoulderGirdle -> {tag}_upperArm -> {tag}_foreArm ->
+  //   {tag}_wrist -> finger0(3 phalanges) + finger1..finger3(2 phalanges each),
+  //   each finger optionally capped by a {tag}_fingerN_claw. The SAME bones exist
+  //   for every genome; only lengths/radii vary (finger length ~0 => absent).
+  // The arm posture blends from a down-reaching LEG (walker) to an out/up WING
+  // (flyer) by `wingness` — driven by wingMembrane (rest-pose only; the wrist
+  // fold / weight-bearing walk is deferred pose/animation work).
+  const wings = [];   // per-side membrane spec, consumed by generateDragon
+  const FINGER_SEGS = [3, 2, 2, 2];
+  const buildForelimb = (side) => {
+    const tag = 'fore' + (side < 0 ? 'L' : 'R');
+    const anchor = P[SHOULDER_IDX];
+    const torsoR = RAD[SHOULDER_IDX];
+    const upperLen = U.armUpper * p.armLength * budL;
+    const foreLen  = U.armLower * p.armLength * budL;
+    const armR = limbR * smoothstep(clamp01(p.armLength / 0.12)); // radius 0 when armLength ~0
+    const wn = clamp01(p.wingMembrane);                 // 0 = leg pose, 1 = wing pose
+
+    // shoulder socket: low on the flank for a walker, high on the back for a flyer
+    const socket = anchor.clone().add(V(side * torsoR * 0.9 * p.girdle, torsoR * lerp(-0.15, 0.45, wn), 0));
+    // upper arm: down-reaching leg (walker) -> raised up+out (flyer)
+    const armDir = nrm(mixV(nrm(V(side * 0.18, -1.0, 0.10)),
+                            nrm(V(side * 0.62, 0.78, 0.02)), wn));
+    const elbow = socket.clone().add(armDir.multiplyScalar(upperLen));
+    // forearm continues out; raised for the wing
+    const foreDir = nrm(mixV(nrm(V(side * 0.06, -1.0, 0.26)),
+                             nrm(V(side * 0.85, 0.48, -0.08)), wn));
+    const wrist = elbow.clone().add(foreDir.multiplyScalar(foreLen));
+
+    add({ name: `${tag}_upperArm`, parent: 'shoulderGirdle', pos: socket, tail: elbow,
+          envelopeRadius: armR, rTail: armR * 0.85, length: upperLen, kind: 'limb' });
+    add({ name: `${tag}_foreArm`, parent: `${tag}_upperArm`, pos: elbow, tail: wrist,
+          envelopeRadius: armR * 0.85, rTail: armR * 0.72, length: foreLen, kind: 'limb' });
+    const wristTail = wrist.clone().add(foreDir.clone().multiplyScalar(Math.max(0.02, armR)));
+    add({ name: `${tag}_wrist`, parent: `${tag}_foreArm`, pos: wrist, tail: wristTail,
+          envelopeRadius: armR * 0.7, rTail: armR * 0.6, length: wrist.distanceTo(wristTail),
+          kind: 'limb' });
+
+    // finger fan frame: `lead` = leading direction (finger0), `fanAxis` = the
+    // direction later fingers rotate toward (splay). Both blend leg<->wing.
+    const lead = nrm(mixV(nrm(V(side * 0.05, -0.5, 1.0)),   // toes forward/down (walker)
+                          nrm(V(side * 0.72, 0.38, -0.55)), wn)); // spar out/up/back = leading edge
+    const fanAxis = nrm(mixV(nrm(V(side * 0.85, -0.10, 0.15)),   // splay sideways (hand)
+                             nrm(V(-side * 0.12, -0.92, -0.32)), wn)); // sweep DOWN = wing trailing edge
+    const spread = 0.15 + 0.80 * p.fingerSpread;
+    const fingerLens = [p.finger0Length, p.finger1Length, p.finger2Length, p.finger3Length];
+
+    const tips = [];   // present fingertips (in fan order) for the membrane
+    for (let fi = 0; fi < 4; fi++) {
+      const totalLen = U.fingerBase * fingerLens[fi] * budL;
+      const present = totalLen > 0.05;
+      const dir0 = nrm(mixV(lead, fanAxis, (fi / 3) * spread));
+      const nseg = FINGER_SEGS[fi];
+      const segLen = totalLen / nseg;
+      const baseR = present ? U.fingerR * p.limbThick * (1.0 - 0.14 * fi) : 0;
+      let base = wrist.clone();
+      let dir = dir0.clone();
+      let parent = `${tag}_wrist`;
+      let lastName = parent, tip = base.clone(), tipDir = dir.clone();
+      for (let s2 = 0; s2 < nseg; s2++) {
+        if (s2 > 0) dir = nrm(mixV(dir, V(dir.x, dir.y - 0.6, dir.z), 0.18)); // gentle curl
+        const next = base.clone().add(dir.clone().multiplyScalar(segLen));
+        const r0 = baseR * (1 - 0.18 * s2);
+        const r1 = baseR * (1 - 0.18 * (s2 + 1));
+        const nm = `${tag}_finger${fi}_${seg2(s2)}`;
+        add({ name: nm, parent, pos: base, tail: next,
+              envelopeRadius: r0, rTail: Math.max(r1, present ? 0.02 : 0),
+              length: segLen, kind: 'finger' });
+        parent = nm; base = next; tip = next; tipDir = dir.clone();
+      }
+      lastName = parent;
+      // claw at the fingertip
+      const clawLen = U.fingerBase * 0.20 * p.foreClaw;
+      const clawR = present && p.foreClaw > 0.02 ? baseR * 0.9 : 0;
+      const clawTip = tip.clone().add(nrm(mixV(tipDir, V(tipDir.x, tipDir.y - 0.9, tipDir.z), 0.45))
+                        .multiplyScalar(clawLen));
+      add({ name: `${tag}_finger${fi}_claw`, parent: lastName, pos: tip, tail: clawTip,
+            envelopeRadius: clawR, rTail: 0.006, length: clawLen, kind: 'claw' });
+      if (present) tips.push(tip);
+    }
+
+    // membrane spec (built as a separate mesh downstream; NOT a field bone).
+    const hipAnchor = P[HIP_IDX].clone().add(V(side * RAD[HIP_IDX] * 0.55, -RAD[HIP_IDX] * 0.15, 0));
+    wings.push({ side, socket, elbow, wrist, tips, hipAnchor,
+                 amount: clamp01(p.wingMembrane) * p.budWing });
   };
-  buildWing(-1); buildWing(1);
 
-  return { bones, byName };
+  // ---- HIND LEG (leg ending in a toed foot with claws) --------------------
+  const buildHindLeg = (side) => {
+    const tag = 'hind' + (side < 0 ? 'L' : 'R');
+    const anchor = P[HIP_IDX];
+    const torsoR = RAD[HIP_IDX];
+    const upperLen = U.legUpper * p.hindLegLength * budL;
+    const lowerLen = U.legLower * p.hindLegLength * budL;
+    const footFwd = 0.24 * p.hindLegLength * budL;
+    const legR = limbR * smoothstep(clamp01(p.hindLegLength / 0.12)); // radius 0 when legless
+
+    const socket = anchor.clone().add(V(side * torsoR * 0.9 * p.girdle, -torsoR * 0.15, 0));
+    const knee = socket.clone().add(V(side * 0.06, -upperLen, 0.05));
+    const ankle = knee.clone().add(V(-side * 0.02, -lowerLen, 0.07));
+    const footPad = ankle.clone().add(V(0, -U.footR * budR * 0.4, footFwd + U.footR * budR));
+
+    add({ name: `${tag}_upper`, parent: 'hipGirdle', pos: socket, tail: knee,
+          envelopeRadius: legR, rTail: legR * 0.82, length: upperLen, kind: 'limb' });
+    add({ name: `${tag}_lower`, parent: `${tag}_upper`, pos: knee, tail: ankle,
+          envelopeRadius: legR * 0.82, rTail: legR * 0.7, length: lowerLen, kind: 'limb' });
+    add({ name: `${tag}_foot`, parent: `${tag}_lower`, pos: ankle, tail: footPad,
+          envelopeRadius: legR * 0.78, rTail: U.footR * budR * (legR > EPS ? 1 : 0),
+          length: footFwd, kind: 'foot', footY: footPad.y - U.footR * budR });
+
+    // toes fan forward off the foot pad; toeCount sets how many are developed.
+    const nToes = Math.max(0, Math.min(4, Math.round(p.toeCount)));
+    for (let ti = 0; ti < 4; ti++) {
+      const present = ti < nToes && p.hindLegLength > 0.05;
+      const toeLen = U.toeBase * p.hindLegLength * budL;
+      const frac = nToes > 1 ? (ti / (nToes - 1) - 0.5) : 0;     // -0.5..0.5 across
+      const dir = nrm(V(side * 0.1 + frac * 0.55, -0.30, 1.0));
+      const toeTip = footPad.clone().add(dir.clone().multiplyScalar(toeLen));
+      const r = present ? U.fingerR * p.limbThick * 0.95 : 0;
+      add({ name: `${tag}_toe${ti}`, parent: `${tag}_foot`, pos: footPad, tail: toeTip,
+            envelopeRadius: r, rTail: Math.max(r * 0.7, present ? 0.02 : 0),
+            length: toeLen, kind: 'toe', footY: toeTip.y - r });
+      const clawLen = U.toeBase * 0.5 * p.hindClaw;
+      const clawR = present && p.hindClaw > 0.02 ? r * 0.9 : 0;
+      const clawTip = toeTip.clone().add(nrm(V(side * 0.05 + frac * 0.4, -0.5, 0.9))
+                        .multiplyScalar(clawLen));
+      add({ name: `${tag}_toe${ti}_claw`, parent: `${tag}_toe${ti}`, pos: toeTip, tail: clawTip,
+            envelopeRadius: clawR, rTail: 0.006, length: clawLen, kind: 'claw' });
+    }
+  };
+
+  for (const side of [-1, 1]) { buildForelimb(side); buildHindLeg(side); }
+
+  return { bones, byName, wings };
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +644,15 @@ function bellyMaterial(p) {
 function hardMaterial(p) {
   const c = new THREE.Color().setHSL((p.hue + 0.08) % 1, p.sat * 0.4, Math.max(0.14, p.light - 0.30));
   return new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.2 });
+}
+// Wing-membrane material: a thin, double-sided, slightly translucent sheet tinted
+// from the body hue (a touch darker/warmer, like real bat/dragon wing skin).
+function membraneMaterial(p) {
+  const c = new THREE.Color().setHSL((p.hue + 0.02) % 1, Math.min(1, p.sat * 0.9), Math.max(0.16, p.light * 0.82));
+  return new THREE.MeshStandardMaterial({
+    color: c, roughness: 0.7, metalness: 0.0, side: THREE.DoubleSide,
+    transparent: true, opacity: 0.9, emissive: c.clone().multiplyScalar(0.06),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -519,14 +692,48 @@ function renderBoneCapsule(group, bone, mat) {
 }
 
 // ---------------------------------------------------------------------------
+// Wing membrane mesh — a thin DOUBLE-SIDED sheet spanning the forelimb.
+// ---------------------------------------------------------------------------
+// The membrane fills BEHIND the leading edge (arm + fingers) back to a trailing
+// anchor on the body flank. It is a triangle FAN rooted at the wrist across the
+// ordered boundary loop [socket, elbow, fingertip0..N, bodyAnchor]. Multiple long
+// fingers therefore yield multiple panels automatically. Flat quad/tri sheet, so
+// it renders identically in smooth, capsule AND voxel modes (the spec's cheap
+// "flat quad sheet" for voxel/MC — no thin-surface voxelization). Returns null
+// when there is no membrane (bare arm/leg) or nothing to span.
+function buildMembraneMesh(spec, baseMat) {
+  const { socket, elbow, wrist, tips, hipAnchor, amount } = spec;
+  if (amount < 0.03 || tips.length < 1) return null;
+  // Fringe (low amount) pulls the trailing body anchor toward the wrist so a low
+  // membrane reads as a thin leading-edge fringe; full membrane reaches the flank.
+  const bodyAnchor = wrist.clone().lerp(hipAnchor, amount);
+  const loop = [socket, elbow, ...tips, bodyAnchor];
+  const pos = [];
+  const push = (v) => pos.push(v.x, v.y, v.z);
+  for (let k = 0; k < loop.length; k++) {         // fan from the wrist
+    push(wrist); push(loop[k]); push(loop[(k + 1) % loop.length]);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  const m = baseMat.clone();
+  m.opacity = lerp(0.5, 0.92, amount);
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.name = 'membrane';
+  return mesh;
+}
+
+// ---------------------------------------------------------------------------
 // generateDragon(genome, age, env) — public entry point.
 // ---------------------------------------------------------------------------
 // Returns a THREE.Group named 'dragon' with:
 //   dragon (Group)  userData:{ genome, age, env, phenotype, skeleton }
 //   ├── body   (Group)  spine + tail capsule chain, belly patch
 //   ├── head   (Group)  userData:{ faceRig, headRadius }  skull+snout+jaw+faceRig
-//   ├── limbs  (Group)  fore/hind leg capsules + girdles (budding-gated)
-//   ├── wings  (Group)  wing spar capsules (budding-gated)
+//   ├── limbs  (Group)  fore/hind arm+leg capsules + girdles (capsule mode only)
+//   ├── appendages (Group)  finger/toe capsules + claws (ALL modes — thin spars
+//   │                   stay crisp instead of vanishing in the coarse field)
+//   ├── wings  (Group)  double-sided membrane sheet(s) spanning each forelimb
 //   └── rigDebug (LineSegments)  ONLY when env.showRig (or window.__showRig)
 //
 // `env.showRig` (or the global window.__showRig) toggles a thin-line bone overlay.
@@ -536,7 +743,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const bellyMat = bellyMaterial(p);
   const hardMat = hardMaterial(p);
 
-  const { bones, byName } = buildSkeleton(p);
+  const { bones, byName, wings: wingSpecs } = buildSkeleton(p);
 
   const dragon = new THREE.Group();
   dragon.name = 'dragon';
@@ -560,8 +767,8 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
 
   if (skinMode === 'smooth') {
     // ---- SMOOTH BODY: one convolution-field marching-cubes mesh -----------
-    // Volumetric bone kinds only; wings stay as spar capsules (thin sheets are
-    // the classic implicit-field failure, per the doc).
+    // Volumetric bone kinds only (body/skull/arm+leg 'limb'/foot/girdle). Fingers,
+    // toes, claws and the wing membrane are thin and render as separate meshes.
     const fieldRes = env.fieldRes
       ?? (typeof window !== 'undefined' ? window.__fieldRes : undefined) ?? 64;
     const smoothK = env.smoothK
@@ -683,7 +890,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   head.userData.headRadius = R;
   dragon.add(head);
 
-  // ---- LIMBS (capsule mode only; smooth/voxel limbs live in the field) ----
+  // ---- LIMBS (arm/leg volumes: capsule mode only; smooth/voxel live in field) --
   if (!fieldBody) {
     const limbs = new THREE.Group();
     limbs.name = 'limbs';
@@ -695,11 +902,25 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     dragon.add(limbs);
   }
 
-  // ---- WINGS (spar chains) — both modes -----------------------------------
+  // ---- APPENDAGES (fingers/toes + claws) — rendered as capsules in ALL skin
+  // modes. Fingers/toes are thin spars: at the coarse field/voxel resolution they
+  // would disappear, so (like the old wing spars) they stay explicit capsules.
+  const appendages = new THREE.Group();
+  appendages.name = 'appendages';
+  for (const b of bones) {
+    if (b.kind === 'finger' || b.kind === 'toe') renderBoneCapsule(appendages, b, mat);
+    else if (b.kind === 'claw') renderBoneCapsule(appendages, b, hardMat);
+  }
+  dragon.add(appendages);
+
+  // ---- WING MEMBRANE (separate double-sided sheet — NOT via the implicit field
+  // so the torso stays clean and the thin sheet renders in every skin mode) ----
   const wings = new THREE.Group();
   wings.name = 'wings';
-  for (const b of bones) {
-    if (b.kind === 'wing') renderBoneCapsule(wings, b, hardMat);
+  const membraneMat = membraneMaterial(p);
+  for (const spec of wingSpecs) {
+    const mesh = buildMembraneMesh(spec, membraneMat);
+    if (mesh) wings.add(mesh);
   }
   dragon.add(wings);
 
@@ -707,11 +928,17 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const showRig = env.showRig ?? (typeof window !== 'undefined' && window.__showRig);
   if (showRig) dragon.add(buildRigOverlay(bones, byName));
 
-  // ---- finalize: lift so feet (or belly) sit near y = 0 -------------------
+  // ---- finalize: lift so feet/hands (or belly) sit near y = 0 -------------
+  // Ground-walking forelimbs (low membrane, long arm) reach their fingertips to
+  // y=0; pure flyers hold the wing up so the hind feet set the floor. We take the
+  // lowest contact over feet, toes, developed fingertips, and the body underside.
   let lowest = Infinity;
   for (const b of bones) {
-    if (b.kind === 'foot' && b.envelopeRadius >= EPS && b.footY !== undefined) {
+    if ((b.kind === 'foot' || b.kind === 'toe') && b.envelopeRadius >= EPS && b.footY !== undefined) {
       lowest = Math.min(lowest, b.footY);
+    }
+    if ((b.kind === 'finger' || b.kind === 'claw') && b.envelopeRadius >= EPS && b.tail) {
+      lowest = Math.min(lowest, b.tail.y - (b.rTail ?? 0));
     }
     if (b.kind === 'body') lowest = Math.min(lowest, b.pos.y - b.envelopeRadius);
   }
