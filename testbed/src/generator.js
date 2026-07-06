@@ -55,8 +55,8 @@ export const GENOME_SCHEMA = [
   // --- Body proportions -----------------------------------------------------
   { name: 'bodyElongation', min: 0.4, max: 2.4, default: 1.0, group: 'Body',
     description: 'Trunk length along the spine. High = long serpentine body (eastern/snake).' },
-  { name: 'robustness',     min: 0.5, max: 1.7, default: 1.0, group: 'Body',
-    description: 'Overall girth: torso & neck & tail envelope radius. High = chunky, low = slender.' },
+  { name: 'robustness',     min: 0.6, max: 1.35, default: 0.85, group: 'Body',
+    description: 'Overall girth: torso & neck & tail envelope radius. High = chunky, low = slender. (Kept in a believable band so adults are not beach-balls.)' },
   { name: 'neckLength',     min: 0.2, max: 2.6, default: 1.0, group: 'Body',
     description: 'Adult neck length (baby necks are always short/stubby, grow with age).' },
   { name: 'tailLength',     min: 0.2, max: 3.0, default: 1.2, group: 'Body',
@@ -78,8 +78,8 @@ export const GENOME_SCHEMA = [
   //     lengths alone decide arm vs wing vs hand. length ~0 => that part absent) -
   { name: 'armLength',    min: 0.0, max: 1.8, default: 1.0, group: 'Forelimb',
     description: 'Shoulder->wrist reach (upper arm + forearm). ~0 = no arm (snake); long+no-membrane = a walking foreleg.' },
-  { name: 'finger0Length',min: 0.0, max: 2.4, default: 1.0, group: 'Forelimb',
-    description: 'Primary finger / main wing spar (the leading edge beyond the wrist). Long = wing spar, short = finger.' },
+  { name: 'finger0Length',min: 0.0, max: 3.2, default: 1.0, group: 'Forelimb',
+    description: 'Primary finger / main wing spar (the leading edge beyond the wrist). Long = big wing spar, short = finger.' },
   { name: 'finger1Length',min: 0.0, max: 2.0, default: 0.6, group: 'Forelimb',
     description: 'Second finger. Short => toe/claw, long => extra wing spar (another membrane panel).' },
   { name: 'finger2Length',min: 0.0, max: 2.0, default: 0.5, group: 'Forelimb',
@@ -165,7 +165,7 @@ function withDefaults(overrides) {
 export const ARCHETYPES = {
   // Snake: reduced front & back pair (lengths ~0), very long body/neck/tail.
   snake: withDefaults({
-    bodyElongation: 2.3, robustness: 0.9, neckLength: 1.8, tailLength: 2.6,
+    bodyElongation: 2.3, robustness: 0.78, neckLength: 1.8, tailLength: 2.6,
     girdleWidth: 0.5, headSize: 0.9, snoutLength: 0.8, jawSize: 0.9,
     armLength: 0.0, finger0Length: 0.0, finger1Length: 0.0, finger2Length: 0.0,
     finger3Length: 0.0, foreClawSize: 0.0, wingMembrane: 0.0,
@@ -176,7 +176,7 @@ export const ARCHETYPES = {
   // other fingers present as toes/claws, fringe-only membrane, NO wings. A clawed
   // four-legged walker.
   drake: withDefaults({
-    bodyElongation: 1.1, robustness: 1.3, neckLength: 1.0, tailLength: 1.3,
+    bodyElongation: 1.1, robustness: 1.0, neckLength: 1.0, tailLength: 1.3,
     girdleWidth: 1.3, headSize: 1.1, snoutLength: 1.0, jawSize: 1.2, limbThickness: 1.3,
     armLength: 1.1, finger0Length: 0.5, finger1Length: 0.55, finger2Length: 0.5,
     finger3Length: 0.45, fingerSpread: 0.7, foreClawSize: 0.9, wingMembrane: 0.12,
@@ -186,10 +186,10 @@ export const ARCHETYPES = {
   // Wyvern (BIPEDAL FLYER): short arm, long primary spar, a few short extra spars,
   // full membrane => a real bat wing. Strong hind legs. The natural flyer.
   wyvern: withDefaults({
-    bodyElongation: 1.0, robustness: 1.0, neckLength: 1.2, tailLength: 1.6,
+    bodyElongation: 1.0, robustness: 0.8, neckLength: 1.2, tailLength: 1.6,
     girdleWidth: 1.0, headSize: 1.05, snoutLength: 1.1, jawSize: 1.1, limbThickness: 1.05,
-    armLength: 0.7, finger0Length: 2.0, finger1Length: 1.3, finger2Length: 1.0,
-    finger3Length: 0.7, fingerSpread: 0.85, foreClawSize: 0.5, wingMembrane: 1.0,
+    armLength: 0.9, finger0Length: 3.1, finger1Length: 2.0, finger2Length: 1.6,
+    finger3Length: 1.2, fingerSpread: 0.95, foreClawSize: 0.5, wingMembrane: 1.0,
     hindLegLength: 1.15, toeCount: 3, hindClawSize: 0.8,
     colorHue: 0.02, colorSaturation: 0.7,
   }),
@@ -197,26 +197,26 @@ export const ARCHETYPES = {
   // several extra spars. Rest pose holds the wing out (the knuckle-walk fold is
   // deferred pose work).
   crawlerFlyer: withDefaults({
-    bodyElongation: 1.15, robustness: 1.05, neckLength: 1.0, tailLength: 1.5,
+    bodyElongation: 1.15, robustness: 0.85, neckLength: 1.0, tailLength: 1.5,
     girdleWidth: 1.1, headSize: 1.0, snoutLength: 0.9, jawSize: 1.0, limbThickness: 1.1,
-    armLength: 0.9, finger0Length: 1.7, finger1Length: 1.2, finger2Length: 1.0,
-    finger3Length: 0.85, fingerSpread: 0.9, foreClawSize: 0.7, wingMembrane: 1.0,
+    armLength: 1.05, finger0Length: 2.7, finger1Length: 1.85, finger2Length: 1.5,
+    finger3Length: 1.25, fingerSpread: 0.95, foreClawSize: 0.7, wingMembrane: 1.0,
     hindLegLength: 1.0, toeCount: 3, hindClawSize: 0.8,
     colorHue: 0.75, colorSaturation: 0.55,
   }),
   // Grasper (T-rex arms): short arm, huge fingers, no membrane — clawed graspers.
   grasper: withDefaults({
-    bodyElongation: 1.05, robustness: 1.15, neckLength: 1.0, tailLength: 1.3,
-    girdleWidth: 1.1, headSize: 1.15, snoutLength: 1.0, jawSize: 1.25, limbThickness: 1.1,
-    armLength: 0.6, finger0Length: 1.2, finger1Length: 1.1, finger2Length: 1.0,
-    finger3Length: 0.5, fingerSpread: 0.6, foreClawSize: 1.2, wingMembrane: 0.0,
+    bodyElongation: 1.05, robustness: 0.95, neckLength: 1.0, tailLength: 1.3,
+    girdleWidth: 1.1, headSize: 1.15, snoutLength: 1.0, jawSize: 1.25, limbThickness: 1.7,
+    armLength: 0.6, finger0Length: 0.95, finger1Length: 0.9, finger2Length: 0.8,
+    finger3Length: 0.55, fingerSpread: 0.55, foreClawSize: 1.35, wingMembrane: 0.0,
     hindLegLength: 1.15, toeCount: 3, hindClawSize: 1.0,
     colorHue: 0.08, colorSaturation: 0.75,
   }),
   // --- aliases (kept so the harness's hard-coded <select> options resolve) ----
   // Quadruped -> the drake walker.
   quadruped: withDefaults({
-    bodyElongation: 1.1, robustness: 1.3, neckLength: 1.0, tailLength: 1.3,
+    bodyElongation: 1.1, robustness: 1.0, neckLength: 1.0, tailLength: 1.3,
     girdleWidth: 1.3, headSize: 1.1, snoutLength: 1.0, jawSize: 1.2, limbThickness: 1.3,
     armLength: 1.1, finger0Length: 0.5, finger1Length: 0.55, finger2Length: 0.5,
     finger3Length: 0.45, fingerSpread: 0.7, foreClawSize: 0.9, wingMembrane: 0.12,
@@ -225,7 +225,7 @@ export const ARCHETYPES = {
   }),
   // Eastern / Chinese: elongated, small dainty limbs, no wings (strict tetrapod).
   eastern: withDefaults({
-    bodyElongation: 2.0, robustness: 0.95, neckLength: 2.0, tailLength: 2.4,
+    bodyElongation: 2.0, robustness: 0.8, neckLength: 2.0, tailLength: 2.4,
     girdleWidth: 0.8, headSize: 1.1, snoutLength: 1.2, jawSize: 1.0, limbThickness: 0.8,
     armLength: 0.6, finger0Length: 0.4, finger1Length: 0.4, finger2Length: 0.35,
     finger3Length: 0.3, fingerSpread: 0.6, foreClawSize: 0.7, wingMembrane: 0.0,
@@ -264,7 +264,7 @@ const U = {
   armUpper:  0.60,   // shoulder->elbow at armLength=1
   armLower:  0.52,   // elbow->wrist at armLength=1
   fingerBase:0.95,   // finger/spar length at fingerXLength=1
-  fingerR:   0.055,  // base finger phalanx radius
+  fingerR:   0.085,  // base finger phalanx radius (chunkier fingers/spars/toes)
   toeBase:   0.30,   // hind toe length at hindLegLength=1
 };
 
@@ -317,8 +317,9 @@ export function phenotype(genome, age = 0, env = {}) {
     neckLen:   g.neckLength * lerp(0.35, 1.0, s),
     tailLen:   g.tailLength * lerp(0.45, 1.0, s),
     girdle:    g.girdleWidth,
-    // girth: babies rounder relative to length; leaner with age
-    girth:     g.robustness * lerp(1.28, 1.0, s),
+    // girth: babies rounder relative to length; leaner with age. Softened baby
+    // boost (1.18, was 1.28) so even babies read as a body, not a sphere.
+    girth:     g.robustness * lerp(1.18, 1.0, s),
 
     // --- unified bat-wing forelimb (per-side; mirrored) ---
     armLength:     g.armLength,
@@ -410,8 +411,10 @@ function buildSkeleton(p) {
     const z = lerp(zSh, zHip, f);
     const y = backArch * Math.sin(Math.PI * f) * 0.5; // gentle arch
     P[i] = V(0, y, z);
-    // torso bump: thickest around mid-abdomen
-    RAD[i] = girthScale * (0.85 + 0.55 * Math.sin(Math.PI * clamp01(f)));
+    // torso profile: tapered toward the shoulder/hip ends with a moderate
+    // mid-abdomen bump. Thinner ends + a lower mid keep the trunk reading as a
+    // longer-than-wide body, not a beach-ball sphere.
+    RAD[i] = girthScale * (0.72 + 0.5 * Math.sin(Math.PI * clamp01(f)));
   }
 
   // Tail points T[0..11], radii TR[0..11] continuing from the hip.
