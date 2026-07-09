@@ -66,7 +66,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1b2330);
+scene.background = new THREE.Color(0x11131a);
 
 // IBL: PMREM a procedural RoomEnvironment (r160 constructor takes the renderer so
 // it uses physically-correct light intensity) → studio-quality ambient + real
@@ -297,9 +297,14 @@ function syncSliders() {
 // ---------------------------------------------------------------------------
 const ageInput = document.getElementById('age');
 const ageVal = document.getElementById('ageVal');
+// Paint the ember "maturation" track fill (0→100%) to match the current age.
+function paintAgeFill() {
+  ageInput.style.setProperty('--p', (age * 100).toFixed(1) + '%');
+}
 ageInput.addEventListener('input', () => {
   age = parseFloat(ageInput.value);
   ageVal.textContent = age.toFixed(2);
+  paintAgeFill();
   scheduleRebuild();
 });
 
@@ -328,6 +333,7 @@ document.getElementById('btnReset').addEventListener('click', () => {
   age = 0.0;
   ageInput.value = '0';
   ageVal.textContent = '0.00';
+  paintAgeFill();
   setArchetypeCustom();
   syncSliders();
   rebuild();
@@ -411,6 +417,22 @@ document.getElementById('btnExportGeo').addEventListener('click', () => {
   downloadBlob(new Blob([json], { type: 'application/json' }),
     `dragon_age${age.toFixed(2)}.geo.json`);
 });
+
+// ---------------------------------------------------------------------------
+// Pose (stance) — strike a named POSE on the live rig. Poses only apply to the
+// smooth-skin rig (voxel/capsule stay static); applyPoseByName is a no-op then.
+// Options are built from POSE_NAMES so this never drifts from poses.js.
+// ---------------------------------------------------------------------------
+const poseSel = document.getElementById('pose');
+if (poseSel) {
+  for (const name of POSE_NAMES) {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    poseSel.appendChild(opt);
+  }
+  poseSel.value = currentPoseName;
+  poseSel.addEventListener('change', () => { applyPoseByName(poseSel.value); });
+}
 
 // ---------------------------------------------------------------------------
 // In-browser gallery — reuse the single renderer to shoot thumbnail grids.
@@ -631,6 +653,7 @@ function setRenderTier(tier) {
 }
 
 buildPanel();
+paintAgeFill();
 resize();
 applyTier();
 rebuild();

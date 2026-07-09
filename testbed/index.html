@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dragons — Test Bed Harness</title>
+  <title>Dragon Explorer — Procedural Codex</title>
 
   <!-- Import map: pin Three.js + addons from a CDN so there is ZERO build step.
        If you are offline, vendor these files into testbed/vendor/ and repoint the
@@ -18,130 +18,420 @@
   </script>
 
   <style>
+    /* ============================================================
+       DRAGON EXPLORER — "Procedural Codex"
+       Identity: an arcane naturalist's console. The left column is a
+       dark specimen sheet (obsidian + gilt hairlines + engraved caps);
+       the right is a lit vitrine holding the live creature — the hero.
+       Two accents carry meaning: EMBER (dragonfire / age) and
+       JADE (living genome / breeding). Nothing else is allowed to shout.
+       ============================================================ */
     :root {
-      --bg: #131922; --panel: #1c2530; --panel2: #232f3d;
-      --ink: #e7eef7; --muted: #93a4b8; --accent: #ffb454; --line: #33465c;
+      /* surfaces — warm obsidian, layered */
+      --obsidian: #0b0d12;
+      --panel:    #12151d;
+      --panel-2:  #191d27;
+      --panel-3:  #222735;
+      --stage-bg: #0d0f15;
+      /* ink — parchment-warm, never pure white */
+      --ink:      #ece2d1;
+      --ink-2:    #c3bcaf;
+      --muted:    #857e70;
+      --faint:    #5c574d;
+      /* structure */
+      --line:     rgba(201,162,75,.14);   /* gilt hairline, low */
+      --line-2:   rgba(255,255,255,.06);
+      --gilt:     #c9a24b;
+      /* accents */
+      --ember-1:  #ff7a34;
+      --ember-2:  #ffc165;
+      --ember-lo: #b5451c;
+      --jade:     #4fd6b0;
+      --jade-dim: #2c7d6a;
+      --danger:   #e5624a;
+      /* type */
+      --f-display: "Copperplate", "Copperplate Gothic Light", "Trajan Pro", "Optima", "Palatino Linotype", Georgia, serif;
+      --f-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --f-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+      --radius: 9px;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; }
     body {
-      font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      color: var(--ink); background: var(--bg); overflow: hidden;
+      font: 13px/1.45 var(--f-body);
+      color: var(--ink); background: var(--obsidian); overflow: hidden;
+      -webkit-font-smoothing: antialiased;
     }
-    #app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    #app { display: grid; grid-template-columns: 348px 1fr; height: 100vh; }
 
-    /* ---- left control column ---- */
+    /* =======================  LEFT · SPECIMEN SHEET  ======================= */
     #panel {
-      background: var(--panel); border-right: 1px solid var(--line);
+      position: relative;
+      background:
+        linear-gradient(180deg, #14171f 0%, #10131a 60%, #0d1016 100%);
+      border-right: 1px solid var(--line);
       display: flex; flex-direction: column; height: 100vh; overflow: hidden;
     }
-    #panelHead { padding: 12px 14px; border-bottom: 1px solid var(--line); }
-    #panelHead h1 { font-size: 14px; margin: 0 0 8px; letter-spacing: .3px; }
-    #panelHead .sub { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
-
-    .age-wrap { background: var(--panel2); border: 1px solid var(--accent);
-      border-radius: 8px; padding: 8px 10px; }
-    .age-wrap label { display: flex; justify-content: space-between;
-      font-weight: 600; color: var(--accent); margin-bottom: 4px; }
-    .age-wrap .hint { color: var(--muted); font-weight: 400; font-size: 10px; }
-
-    #controls { flex: 1; overflow-y: auto; padding: 8px 12px 20px; }
-    .group { margin-top: 12px; }
-    .group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
-      color: var(--muted); margin: 8px 0 6px; border-bottom: 1px solid var(--line);
-      padding-bottom: 3px; }
-    .row { display: grid; grid-template-columns: 92px 1fr 40px; align-items: center;
-      gap: 8px; margin: 3px 0; }
-    .row label { color: var(--ink); font-size: 11px; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis; cursor: help; }
-    .row .val { color: var(--muted); font-variant-numeric: tabular-nums;
-      text-align: right; font-size: 11px; }
-
-    input[type=range] { width: 100%; accent-color: var(--accent); }
-
-    /* ---- buttons / actions ---- */
-    #actions { padding: 10px 12px; border-top: 1px solid var(--line);
-      display: flex; flex-wrap: wrap; gap: 6px; background: var(--panel); }
-    button, select {
-      background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
-      border-radius: 6px; padding: 6px 9px; font-size: 11px; cursor: pointer;
+    /* a faint gilt seam runs the panel edge, like the spine of a codex */
+    #panel::after {
+      content: ""; position: absolute; top: 0; right: -1px; bottom: 0; width: 1px;
+      background: linear-gradient(180deg, transparent, var(--gilt) 12%, transparent 40%,
+                  var(--gilt) 55%, transparent 88%);
+      opacity: .35; pointer-events: none;
     }
-    button:hover, select:hover { border-color: var(--accent); }
-    #actions .row2 { display: flex; gap: 6px; width: 100%; align-items: center; }
-    #actions .row2 label { color: var(--muted); font-size: 11px; }
 
-    #readoutWrap { padding: 0 12px 10px; }
-    #readout { width: 100%; height: 120px; background: #0f141b; color: #a9d4a0;
-      border: 1px solid var(--line); border-radius: 6px; font: 11px/1.4 ui-monospace,
-      Menlo, monospace; resize: vertical; padding: 8px; }
+    /* ---- header / branding ---- */
+    #panelHead { padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .crest { width: 38px; height: 38px; flex: none; filter: drop-shadow(0 1px 4px rgba(255,122,52,.25)); }
+    .brand h1 {
+      font: 400 17px/1 var(--f-display);
+      letter-spacing: .16em; margin: 0; color: var(--ink);
+      text-shadow: 0 1px 0 rgba(0,0,0,.5);
+    }
+    .brand .eyebrow {
+      display: block; font: 600 8.5px/1 var(--f-body); letter-spacing: .34em;
+      text-transform: uppercase; color: var(--gilt); margin-bottom: 6px; opacity: .85;
+    }
+    .tagline { color: var(--muted); font-size: 11px; margin: 12px 0 0; letter-spacing: .01em; }
 
-    /* ---- right stage ---- */
-    #stage { position: relative; }
-    #view { width: 100%; height: 100%; display: block; }
-    #hud { position: absolute; left: 12px; bottom: 10px; color: var(--muted);
-      font-size: 11px; background: rgba(0,0,0,.35); padding: 4px 8px; border-radius: 6px; }
-    #err { position: absolute; inset: 12px 12px auto 12px; background: #4a1f1f;
-      color: #ffd7d7; border: 1px solid #a33; border-radius: 8px; padding: 10px 12px;
-      font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; display: none; }
+    /* ---- the signature: MATURATION (age) control ---- */
+    .maturation {
+      margin-top: 15px; padding: 13px 14px 12px;
+      background:
+        radial-gradient(120% 140% at 0% 0%, rgba(255,122,52,.09), transparent 55%),
+        var(--panel-2);
+      border: 1px solid rgba(255,122,52,.28);
+      border-radius: var(--radius);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.3), 0 2px 10px rgba(0,0,0,.25);
+    }
+    .maturation .mrow { display: flex; align-items: baseline; justify-content: space-between; }
+    .maturation .mlabel {
+      font: 600 9px/1 var(--f-body); letter-spacing: .3em; text-transform: uppercase;
+      color: var(--ember-2);
+    }
+    .maturation .mval {
+      font: 500 26px/1 var(--f-mono); letter-spacing: -.01em;
+      color: var(--ink);
+      background: linear-gradient(180deg, var(--ember-2), var(--ember-1));
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .maturation input[type=range] { margin: 12px 0 7px; }
+    .maturation .legend {
+      display: flex; justify-content: space-between;
+      font: 500 9.5px/1 var(--f-body); letter-spacing: .06em; text-transform: uppercase;
+      color: var(--muted);
+    }
+    .maturation .legend b { color: var(--ink-2); font-weight: 600; }
+    .maturation .legend .l-sub { color: var(--faint); font-weight: 500; letter-spacing: .12em; }
 
-    /* ---- Skin & View / Gallery groups ---- */
-    .emotion-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
-    .emotion-row label { color: var(--muted); font-size: 11px; }
+    /* ---- emotion (kept first <select> — headless render.mjs targets it) ---- */
+    .emotion-row { display: flex; gap: 8px; align-items: center; margin-top: 13px; }
+    .emotion-row > label {
+      font: 600 8.5px/1 var(--f-body); letter-spacing: .22em; text-transform: uppercase;
+      color: var(--muted); white-space: nowrap;
+    }
     .emotion-row select { flex: 1; }
-    .row.chk { grid-template-columns: 92px 1fr; }
-    .row.wide { grid-template-columns: 1fr; }
-    .row.dim { opacity: .4; }
-    .row select { width: 100%; }
-    .grp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-    .grp-btns button { flex: 1; }
+    #btnCopy { flex: none; }
 
-    /* ---- in-browser gallery overlay ---- */
-    #gallery { position: absolute; inset: 0; z-index: 20; display: none;
-      flex-direction: column; background: rgba(15,20,27,.97); }
-    #galleryBar { display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 14px; border-bottom: 1px solid var(--line); }
-    #galleryTitle { font-size: 13px; margin: 0; color: var(--accent); font-weight: 600; }
-    #galleryStatus { color: var(--muted); font-size: 11px; font-weight: 400; }
-    #galleryGrid { flex: 1; overflow: auto; padding: 14px; }
-    .galRow { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
-      margin-bottom: 14px; }
-    .galCell { margin: 0; background: var(--panel2); border: 1px solid var(--line);
-      border-radius: 8px; padding: 6px; width: 200px; }
+    /* ---- scrolling control body ---- */
+    #controls { flex: 1; overflow-y: auto; padding: 6px 16px 26px; }
+    #controls::-webkit-scrollbar { width: 9px; }
+    #controls::-webkit-scrollbar-thumb { background: var(--panel-3); border-radius: 9px;
+      border: 2px solid var(--panel); }
+    #controls::-webkit-scrollbar-thumb:hover { background: #2c3242; }
+
+    /* section = a codex heading. NOT numbered — genome groups aren't a sequence. */
+    .group { margin-top: 20px; }
+    .group:first-child { margin-top: 16px; }
+    .group h3 {
+      display: flex; align-items: center; gap: 9px;
+      font: 600 9.5px/1 var(--f-body); text-transform: uppercase; letter-spacing: .26em;
+      color: var(--ink-2); margin: 0 0 12px;
+    }
+    .group h3::before {
+      content: ""; width: 5px; height: 5px; flex: none; transform: rotate(45deg);
+      background: var(--gilt); box-shadow: 0 0 6px rgba(201,162,75,.5);
+    }
+    .group h3::after {
+      content: ""; flex: 1; height: 1px;
+      background: linear-gradient(90deg, var(--line), transparent);
+    }
+
+    /* generic control row (label · slider · value) — the shape app.js builds */
+    .row { display: grid; grid-template-columns: 96px 1fr 38px; align-items: center;
+      gap: 10px; margin: 7px 0; }
+    .row > label {
+      color: var(--ink-2); font-size: 11.5px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; cursor: help;
+    }
+    .row .val {
+      color: var(--muted); font: 500 11px/1 var(--f-mono);
+      font-variant-numeric: tabular-nums; text-align: right;
+    }
+    .row.chk { grid-template-columns: 96px 1fr; }
+    .row.wide { grid-template-columns: 1fr; }
+    .row.dim { opacity: .38; }
+    .row select { width: 100%; }
+
+    /* =======================  FORM CONTROLS  ======================= */
+    select, button, textarea { font-family: var(--f-body); }
+    select, button {
+      background: var(--panel-2); color: var(--ink);
+      border: 1px solid var(--line-2); border-radius: 7px;
+      padding: 7px 10px; font-size: 11.5px; cursor: pointer;
+      transition: border-color .14s, background .14s, color .14s;
+    }
+    select {
+      -webkit-appearance: none; appearance: none;
+      padding-right: 26px;
+      background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: right 11px center, right 6px center;
+      background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+    }
+    select:hover, button:hover { border-color: rgba(201,162,75,.55); color: #fff; }
+    select:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--jade); outline-offset: 1px;
+    }
+    button:active { transform: translateY(1px); }
+
+    /* =======================  RANGE SLIDERS  ======================= */
+    input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 20px; background: transparent; cursor: pointer;
+    }
+    /* track — WebKit */
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 4px; border-radius: 4px;
+      background: var(--panel-3);
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #fff, var(--jade) 55%, var(--jade-dim));
+      border: 1px solid rgba(0,0,0,.45);
+      box-shadow: 0 1px 3px rgba(0,0,0,.5);
+    }
+    input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: var(--panel-3); }
+    input[type=range]::-moz-range-thumb {
+      width: 13px; height: 13px; border-radius: 50%; border: 1px solid rgba(0,0,0,.45);
+      background: radial-gradient(circle at 35% 30%, #fff, var(--jade) 55%, var(--jade-dim));
+    }
+    /* the maturation (age) slider: an EMBER track that fills with age (--p set by JS) */
+    .maturation input[type=range]::-webkit-slider-runnable-track {
+      height: 6px; border-radius: 6px;
+      background:
+        linear-gradient(90deg, var(--ember-lo), var(--ember-1) 55%, var(--ember-2)) 0/var(--p, 0%) 100% no-repeat,
+        #23262f;
+    }
+    .maturation input[type=range]::-webkit-slider-thumb {
+      width: 18px; height: 18px; margin-top: -6px;
+      background: radial-gradient(circle at 35% 30%, #fff6e6, var(--ember-2) 45%, var(--ember-1));
+      border: 1px solid rgba(0,0,0,.5);
+      box-shadow: 0 0 0 4px rgba(255,122,52,.16), 0 1px 4px rgba(0,0,0,.55);
+    }
+    .maturation input[type=range]::-moz-range-progress { height: 6px; border-radius: 6px;
+      background: linear-gradient(90deg, var(--ember-lo), var(--ember-2)); }
+    .maturation input[type=range]::-moz-range-track { height: 6px; border-radius: 6px; background: #23262f; }
+    .maturation input[type=range]::-moz-range-thumb {
+      width: 16px; height: 16px;
+      background: radial-gradient(circle at 35% 30%, #fff6e6, var(--ember-1));
+      border: 1px solid rgba(0,0,0,.5);
+    }
+
+    /* button group (gallery / poses) */
+    .grp-btns { display: flex; gap: 7px; flex-wrap: wrap; }
+    .grp-btns button { flex: 1; min-width: 0; }
+
+    /* geo export = a quieter, full-width secondary action */
+    #btnExportGeo { width: 100%; text-align: center; letter-spacing: .04em; }
+
+    /* =======================  ACTIONS DOCK  ======================= */
+    #actions {
+      padding: 12px 16px; border-top: 1px solid var(--line);
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      background: linear-gradient(180deg, transparent, rgba(0,0,0,.25));
+    }
+    #actions button { width: 100%; justify-self: stretch; text-align: center; }
+    #btnRandom {
+      border-color: rgba(79,214,176,.4); color: var(--jade);
+      grid-column: 1 / -1;
+      background: linear-gradient(180deg, rgba(79,214,176,.1), rgba(79,214,176,.03));
+    }
+    #btnRandom:hover { border-color: var(--jade); color: #eafff9;
+      background: linear-gradient(180deg, rgba(79,214,176,.2), rgba(79,214,176,.06)); }
+
+    /* =======================  GENOME READOUT  ======================= */
+    #readoutWrap { padding: 0 16px 14px; }
+    .readout-head {
+      display: flex; align-items: center; gap: 8px; margin: 0 0 6px;
+      font: 600 8.5px/1 var(--f-body); text-transform: uppercase; letter-spacing: .24em;
+      color: var(--muted);
+    }
+    .readout-head .dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--jade);
+      box-shadow: 0 0 7px var(--jade); animation: pulse 2.4s ease-in-out infinite;
+    }
+    #readout {
+      width: 100%; height: 116px; resize: vertical;
+      background: #090b0f; color: #9be3cf;
+      border: 1px solid var(--line-2); border-radius: 8px;
+      font: 11px/1.5 var(--f-mono); padding: 9px 10px;
+    }
+
+    /* =======================  RIGHT · VIVARIUM (hero)  ======================= */
+    #stage { position: relative; background: var(--stage-bg); overflow: hidden; }
+    #view { width: 100%; height: 100%; display: block; }
+    /* cinematic vitrine vignette painted OVER the (opaque) canvas; click-through */
+    #stageVignette {
+      position: absolute; inset: 0; pointer-events: none; z-index: 5;
+      background:
+        radial-gradient(120% 90% at 50% 38%, transparent 40%, rgba(0,0,0,.28) 82%, rgba(0,0,0,.5) 100%);
+      box-shadow: inset 0 0 90px 20px rgba(0,0,0,.35);
+    }
+    /* corner plate — a small brass placard for the specimen on display */
+    .stagePlate {
+      position: absolute; top: 14px; left: 16px; z-index: 6; pointer-events: none;
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 12px 7px 10px;
+      background: rgba(12,14,20,.62); backdrop-filter: blur(7px);
+      border: 1px solid var(--line); border-left: 2px solid var(--gilt);
+      border-radius: 7px;
+    }
+    .stagePlate .live { width: 7px; height: 7px; border-radius: 50%; background: var(--jade);
+      box-shadow: 0 0 8px var(--jade); animation: pulse 2.4s ease-in-out infinite; }
+    .stagePlate .txt { font: 600 9px/1.35 var(--f-body); letter-spacing: .22em;
+      text-transform: uppercase; color: var(--ink-2); }
+    .stagePlate .txt span { display: block; color: var(--faint); letter-spacing: .18em;
+      font-size: 8px; margin-top: 3px; }
+
+    #hud {
+      position: absolute; left: 16px; bottom: 14px; z-index: 6; color: var(--muted);
+      font: 500 10.5px/1 var(--f-body); letter-spacing: .04em;
+      background: rgba(12,14,20,.55); backdrop-filter: blur(6px);
+      padding: 6px 11px; border-radius: 7px; border: 1px solid var(--line-2);
+    }
+    #err {
+      position: absolute; inset: 14px 14px auto 14px; z-index: 30;
+      background: #2a1414; color: #ffd7d7; border: 1px solid var(--danger);
+      border-radius: 9px; padding: 11px 13px;
+      font: 12px/1.5 var(--f-mono); white-space: pre-wrap; display: none;
+    }
+
+    /* =======================  GALLERY OVERLAY  ======================= */
+    #gallery {
+      position: absolute; inset: 0; z-index: 20; display: none;
+      flex-direction: column;
+      background: linear-gradient(180deg, rgba(9,11,15,.985), rgba(11,13,19,.985));
+      backdrop-filter: blur(3px);
+    }
+    #galleryBar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--line);
+    }
+    #galleryTitle {
+      font: 400 15px/1 var(--f-display); letter-spacing: .14em; margin: 0; color: var(--ember-2);
+    }
+    #galleryStatus { color: var(--muted); font: 500 11px/1 var(--f-mono); letter-spacing: 0;
+      margin-left: 8px; }
+    #galleryClose { font-size: 11px; }
+    #galleryGrid { flex: 1; overflow: auto; padding: 18px; }
+    .galRow { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-bottom: 16px; }
+    .galCell {
+      margin: 0; width: 210px; padding: 8px;
+      background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
+      transition: border-color .15s, transform .15s;
+    }
+    .galCell:hover { border-color: rgba(201,162,75,.5); transform: translateY(-2px); }
     .galCell img { width: 100%; height: 180px; object-fit: contain; display: block;
-      background: #14141c; border-radius: 4px; }
-    .galCell figcaption { text-align: center; color: var(--muted); font-size: 11px;
-      margin-top: 4px; }
+      background: #0c0e13; border-radius: 6px; }
+    .galCell figcaption { text-align: center; color: var(--muted);
+      font: 500 10.5px/1 var(--f-mono); margin-top: 7px; letter-spacing: .02em; }
+
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+    /* responsive: on narrow viewports let the sheet ride above the vitrine */
+    @media (max-width: 720px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+      #panel { height: auto; max-height: 52vh; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, .readout-head .dot, .stagePlate .live { animation: none !important; transition: none !important; }
+    }
   </style>
 </head>
 <body>
   <div id="app">
-    <!-- LEFT: controls -->
+    <!-- ===================  LEFT · SPECIMEN SHEET  =================== -->
     <div id="panel">
       <div id="panelHead">
-        <h1>🐲 Dragons Test Bed</h1>
-        <div class="sub">Scrub <b>Age</b> to watch the cute→cool arc. Tune traits below.</div>
-        <div class="age-wrap">
-          <label>AGE <span id="ageVal">0.00</span></label>
-          <input id="age" type="range" min="0" max="1" step="0.005" value="0" />
-          <div class="hint">0 = cute baby · 1 = cool adult</div>
+        <div class="brand">
+          <svg class="crest" viewBox="0 0 44 44" aria-hidden="true">
+            <defs>
+              <linearGradient id="ember" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#ffd88a"/>
+                <stop offset="1" stop-color="#ff6a2b"/>
+              </linearGradient>
+            </defs>
+            <path d="M22 2 L42 22 L22 42 L2 22 Z" fill="#12141b" stroke="#c9a24b" stroke-width="1.4"/>
+            <path d="M8 22 Q22 12.5 36 22 Q22 31.5 8 22 Z" fill="url(#ember)"/>
+            <path d="M22 14.5 Q24.6 22 22 29.5 Q19.4 22 22 14.5 Z" fill="#12141b"/>
+            <circle cx="25.6" cy="19.2" r="1.5" fill="#fff2d8"/>
+          </svg>
+          <div>
+            <span class="eyebrow">Procedural Bestiary</span>
+            <h1>Dragon Explorer</h1>
+          </div>
         </div>
-        <!-- Emotion lives here (right under AGE) so it stays the FIRST <select>
-             in the document — render.mjs --emotion targets querySelector('select'). -->
+        <p class="tagline">Sculpt a genome. Scrub the years. Watch it grow from hatchling to elder wyrm.</p>
+
+        <!-- SIGNATURE control: age = the cute→cool maturation arc, made the hero. -->
+        <div class="maturation">
+          <div class="mrow">
+            <span class="mlabel">Maturation</span>
+            <span class="mval" id="ageVal">0.00</span>
+          </div>
+          <!-- MUST remain the FIRST <input type=range> in the document
+               (render.mjs / gallery.mjs drive querySelectorAll('input[type=range]')[0]). -->
+          <input id="age" type="range" min="0" max="1" step="0.005" value="0"
+                 aria-label="Maturation age from hatchling to elder" />
+          <div class="legend">
+            <span><b>Hatchling</b> <span class="l-sub">cute</span></span>
+            <span class="l-sub">Elder wyrm <b>cool</b></span>
+          </div>
+        </div>
+
+        <!-- Emotion MUST remain the FIRST <select> in the document
+             (render.mjs --emotion targets querySelector('select')). -->
         <div class="emotion-row">
-          <label for="emotion">Emotion</label>
+          <label for="emotion">Mood</label>
           <select id="emotion"></select>
-          <button id="btnCopy" title="Copy genome JSON">⧉ Copy</button>
+          <button id="btnCopy" title="Copy genome JSON to clipboard">Copy</button>
         </div>
       </div>
 
       <div id="controls">
-        <!-- Skin & View: capabilities that used to be console/CLI-only. -->
+        <!-- Presentation: archetype, skin method, render fidelity, voxel res, rig overlay -->
         <section class="group">
-          <h3>Skin &amp; View</h3>
+          <h3>Form &amp; Skin</h3>
           <div class="row">
-            <label title="Body skinning method">Skin mode</label>
+            <label title="Load an archetype genome into the live sliders">Archetype</label>
+            <select id="archetype">
+              <option value="custom">Custom</option>
+              <option value="snake">Snake</option>
+              <option value="drake">Drake (walker)</option>
+              <option value="wyvern">Wyvern (flyer)</option>
+              <option value="crawlerFlyer">Crawler-flyer</option>
+              <option value="grasper">Grasper</option>
+              <option value="eastern">Eastern</option>
+            </select>
+            <span></span>
+          </div>
+          <div class="row">
+            <label title="Body skinning method">Skin</label>
             <select id="skinMode">
-              <option value="smooth">Smooth</option>
+              <option value="smooth">Smooth mesh</option>
               <option value="capsule">Capsule</option>
               <option value="voxel">Voxel (Minecraft)</option>
             </select>
@@ -164,56 +454,67 @@
             <label title="Overlay the bone rig">Show rig</label>
             <input id="showRig" type="checkbox" />
           </div>
+        </section>
+
+        <!-- Motion: strike a named pose on the live rig (smooth skin only) -->
+        <section class="group">
+          <h3>Pose</h3>
           <div class="row">
-            <label title="Load an archetype genome into the live sliders">Archetype</label>
-            <select id="archetype">
-              <option value="custom">Custom</option>
-              <option value="snake">Snake</option>
-              <option value="drake">Drake (walker)</option>
-              <option value="wyvern">Wyvern (flyer)</option>
-              <option value="crawlerFlyer">Crawler-flyer</option>
-              <option value="grasper">Grasper</option>
-              <option value="eastern">Eastern</option>
-            </select>
+            <label title="Strike a named pose on the live rig (smooth skin only)">Stance</label>
+            <select id="pose"></select>
             <span></span>
           </div>
-          <div class="row wide">
-            <button id="btnExportGeo" title="Download the current dragon as a Bedrock geo.json">⬇ Export geo.json</button>
-          </div>
         </section>
-        <!-- Gallery: batch-render thumbnails with the single renderer. -->
+
+        <!-- Export the current dragon for the Minecraft (Bedrock) path -->
         <section class="group">
-          <h3>Gallery</h3>
-          <div class="grp-btns">
-            <button id="btnGalAge">Age strip</button>
-            <button id="btnGalVar">Variation</button>
-            <button id="btnGalTree">Breeding tree</button>
+          <h3>Export</h3>
+          <div class="row wide">
+            <button id="btnExportGeo" title="Download the current dragon as a Bedrock geo.json">Download geo.json (Bedrock)</button>
           </div>
         </section>
-        <!-- genome sliders injected from GENOME_SCHEMA below -->
+
+        <!-- Gallery: batch-render contact sheets with the single renderer -->
+        <section class="group">
+          <h3>Contact sheets</h3>
+          <div class="grp-btns">
+            <button id="btnGalAge" title="Same genome aging 0→1">Age strip</button>
+            <button id="btnGalVar" title="Nine random genomes">Variations</button>
+            <button id="btnGalTree" title="Mutation / breeding lineage">Lineage</button>
+          </div>
+        </section>
+        <!-- genome sliders injected from GENOME_SCHEMA below (into #controls) -->
       </div>
 
       <div id="actions">
-        <button id="btnRandom">🎲 Randomize</button>
-        <button id="btnReset">↺ Reset</button>
-        <button id="btnExport">⬇ glTF</button>
-        <button id="btnShot">📷 PNG</button>
+        <button id="btnRandom" title="Roll a fresh random genome">Randomize genome</button>
+        <button id="btnReset" title="Restore the default dragon">Reset</button>
+        <button id="btnExport" title="Export current mesh as glTF">Export glTF</button>
+        <button id="btnShot" title="Save a PNG of the viewport">Save PNG</button>
       </div>
+
       <div id="readoutWrap">
+        <p class="readout-head"><span class="dot"></span> Live genome</p>
         <textarea id="readout" readonly spellcheck="false"></textarea>
       </div>
     </div>
 
-    <!-- RIGHT: 3D stage -->
+    <!-- ===================  RIGHT · VIVARIUM (hero)  =================== -->
     <div id="stage">
       <canvas id="view"></canvas>
-      <div id="hud">drag = orbit · scroll = zoom · right-drag = pan</div>
+      <div id="stageVignette"></div>
+      <div class="stagePlate">
+        <span class="live"></span>
+        <span class="txt">Observation Vivarium<span>Live · procedural idle</span></span>
+      </div>
+      <div id="hud">drag orbit · scroll zoom · right-drag pan</div>
       <div id="err"></div>
-      <!-- In-browser gallery overlay (thumbnail grid over the 3D stage). -->
+
+      <!-- In-browser gallery overlay (thumbnail grid over the vitrine). -->
       <div id="gallery">
         <div id="galleryBar">
           <h2 id="galleryTitle">Gallery <span id="galleryStatus"></span></h2>
-          <button id="galleryClose">✕ Close</button>
+          <button id="galleryClose">Close</button>
         </div>
         <div id="galleryGrid"></div>
       </div>
