@@ -7,6 +7,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import {
   GENOME_SCHEMA, DEFAULT_GENOME, FACE_TRAITS,
@@ -40,13 +45,19 @@ if (typeof window !== 'undefined') {
   window.__renderTier ??= 'high';
 }
 
-// Per-tier rendering config. (Post-processing composer + soft/contact shadows are
-// a follow-up phase; `composer` is reserved for that and currently unused.)
+// Per-tier rendering config. HIGH is the Explorer showcase (IBL + PBR materials +
+// EffectComposer post-fx + VSM soft shadows + contact shadow + studio backdrop);
+// CHEAP is the Minecraft/perf path (flat materials, plain PCF shadow, no composer,
+// no env, no backdrop — a flat, fast, honest reduced tier).
 const TIERS = {
-  high:  { env: true,  envMapIntensity: 0.75, exposure: 1.05, grid: false,
-           key: 1.6, fill: 0.25, rim: 1.4, hemi: 0.15 },
-  cheap: { env: false, envMapIntensity: 0.0,  exposure: 1.0,  grid: true,
-           key: 2.2, fill: 0.7,  rim: 0.9, hemi: 0.6 },
+  high:  { composer: true,  env: true,  envMapIntensity: 0.75, exposure: 1.1, grid: false,
+           key: 1.6, fill: 0.25, rim: 1.4, hemi: 0.15,
+           shadowType: THREE.VSMShadowMap,    contactShadow: true,  backdrop: true,
+           groundColor: 0x171b23, groundRough: 0.95 },
+  cheap: { composer: false, env: false, envMapIntensity: 0.0,  exposure: 1.0, grid: true,
+           key: 2.2, fill: 0.7,  rim: 0.9, hemi: 0.6,
+           shadowType: THREE.PCFSoftShadowMap, contactShadow: false, backdrop: false,
+           groundColor: 0x2a3340, groundRough: 1.0 },
 };
 const tierCfg = () => TIERS[window.__renderTier] ?? TIERS.high;
 
@@ -83,6 +94,11 @@ camera.position.set(4.5, 3.0, 6.5);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.target.set(0, 1.2, 0);
+// Track whether the user has grabbed the camera, so auto-frame (boot / archetype
+// swap) never yanks the view mid-inspection. OrbitControls fires 'start' on any
+// user pointer/scroll interaction.
+let userMovedCamera = false;
+controls.addEventListener('start', () => { userMovedCamera = true; });
 
 // --- lighting: rough 3-point setup ---------------------------------------
 // Light rig — rebalanced by applyTier(): in high tier the IBL carries ambient/fill
@@ -97,6 +113,10 @@ key.shadow.camera.left = -8; key.shadow.camera.right = 8;
 key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
 key.shadow.bias = -0.0004;
 key.shadow.normalBias = 0.02;
+// VSM softness (only takes effect under VSMShadowMap = high tier; PCFSoft ignores
+// radius). blurSamples trades a little cost for a smoother penumbra.
+key.shadow.radius = 7;
+key.shadow.blurSamples = 16;
 scene.add(key);
 
 const fill = new THREE.DirectionalLight(0x9fc0ff, 0.7);
@@ -123,6 +143,107 @@ const grid = new THREE.GridHelper(24, 24, 0x55708f, 0x3a4a5c);
 grid.position.y = 0.001;
 scene.add(grid);
 
+// --- studio backdrop (high tier) ------------------------------------------
+// A soft vertical gradient so the creature reads against a considered vitrine
+// sweep instead of a flat slate. A 2D CanvasTexture assigned to scene.background
+// paints stretched across the viewport (cool obsidian up top → deep at the
+// horizon where it meets the ground). Cheap tier keeps the flat solid colour.
+const FLAT_BG = new THREE.Color(0x11131a);
+function makeBackdropTexture() {
+  const c = document.createElement('canvas');
+  c.width = 8; c.height = 512;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0.00, '#191d27');   // top — lifted obsidian
+  g.addColorStop(0.55, '#12151d');
+  g.addColorStop(1.00, '#0a0c11');   // bottom — deep, meets the ground disc
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 8, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const backdropTexture = makeBackdropTexture();
+
+// --- contact shadow (high tier) -------------------------------------------
+// A cheap, soft blurred blob under the dragon that grounds it (the tight belly
+// occlusion the directional VSM shadow can't give). Radial-gradient alpha on a
+// ground-hugging plane; fitted to the dragon's XZ footprint in rebuild().
+function makeContactShadowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 2, 64, 64, 64);
+  g.addColorStop(0.0, 'rgba(0,0,0,0.42)');
+  g.addColorStop(0.45, 'rgba(0,0,0,0.22)');
+  g.addColorStop(1.0, 'rgba(0,0,0,0.0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const contactShadow = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({
+    map: makeContactShadowTexture(), transparent: true,
+    depthWrite: false, opacity: 0.75,
+  })
+);
+contactShadow.rotation.x = -Math.PI / 2;
+contactShadow.position.y = 0.013;   // just above the ground disc, below the belly
+contactShadow.renderOrder = 2;
+scene.add(contactShadow);
+
+// Fit the contact-shadow blob to the current dragon's ground footprint.
+function refreshContactShadow() {
+  if (!contactShadow.visible || !currentDragon) return;
+  const box = new THREE.Box3().setFromObject(currentDragon);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  // Oval a touch larger than the silhouette; local Y maps to world Z after tilt.
+  contactShadow.scale.set(Math.max(size.x, 0.5) * 1.4, Math.max(size.z, 0.5) * 1.6, 1);
+  contactShadow.position.x = center.x;
+  contactShadow.position.z = center.z;
+}
+
+// ---------------------------------------------------------------------------
+// Post-processing composer (HIGH tier only). Order matters — HDR/AO first, tone
+// map LAST:  RenderPass → GTAOPass → UnrealBloomPass → OutputPass.
+//   * The composer target is MSAA (samples:4) + HalfFloat, so anti-aliasing is
+//     hardware MSAA inside the chain and the whole pipe stays HDR-linear until
+//     the end (bloom thresholds > 1 work; highlights don't clip early).
+//   * TONE MAPPING HAPPENS EXACTLY ONCE: RenderPass renders the scene into the
+//     (non-canvas) HalfFloat target, where three skips tone mapping, so the beauty
+//     stays HDR-linear; OutputPass reads renderer.toneMapping / outputColorSpace
+//     and applies ACES + sRGB as the final pass. renderer.toneMapping therefore
+//     stays set — it's consumed by OutputPass here, and by the cheap tier's plain
+//     renderer.render (which draws straight to the canvas and tone-maps there).
+// ---------------------------------------------------------------------------
+const _bufSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+const composer = new EffectComposer(
+  renderer,
+  new THREE.WebGLRenderTarget(_bufSize.x, _bufSize.y, {
+    samples: 4, type: THREE.HalfFloatType,
+  })
+);
+composer.addPass(new RenderPass(scene, camera));
+const gtaoPass = new GTAOPass(scene, camera, _bufSize.x, _bufSize.y);
+gtaoPass.output = GTAOPass.OUTPUT.Default;   // AO multiplied over the beauty pass
+gtaoPass.blendIntensity = 0.85;
+// World-space AO tuned for a ~10-unit dragon: a modest radius seats ears↔skull,
+// legs↔body, spikes↔skin without haloing the silhouette.
+gtaoPass.updateGtaoMaterial({
+  radius: 0.55, distanceExponent: 1.0, thickness: 1.0, scale: 1.0,
+  samples: 16, screenSpaceRadius: false,
+});
+composer.addPass(gtaoPass);
+// Subtle, HDR-driven bloom — only true highlights (eye catchlights, rim glints)
+// bloom. strength 0.22 / radius 0.5 / threshold 0.85.
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(_bufSize.x, _bufSize.y), 0.22, 0.5, 0.85
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());   // ACES + sRGB, applied ONCE, at the end
+
 // ---------------------------------------------------------------------------
 // Render tier: apply env map, light balance, exposure, grid visibility for the
 // active window.__renderTier. Called at boot and whenever the tier changes; the
@@ -140,12 +261,29 @@ function applyEnvMapIntensity(obj, intensity) {
 function applyTier() {
   const cfg = tierCfg();
   scene.environment = cfg.env ? envTexture : null;
+  scene.background = cfg.backdrop ? backdropTexture : FLAT_BG;
   renderer.toneMappingExposure = cfg.exposure;
   key.intensity = cfg.key;
   fill.intensity = cfg.fill;
   rim.intensity = cfg.rim;
   hemi.intensity = cfg.hemi;
   grid.visible = cfg.grid;
+  // Soft shadows: VSM (blurrable) in high, PCFSoft in cheap. Switching the shadow
+  // map type at runtime needs a shadow-map refresh + material recompile.
+  if (renderer.shadowMap.type !== cfg.shadowType) {
+    renderer.shadowMap.type = cfg.shadowType;
+    renderer.shadowMap.needsUpdate = true;
+    scene.traverse((n) => {
+      if (!n.material) return;
+      const mats = Array.isArray(n.material) ? n.material : [n.material];
+      for (const m of mats) m.needsUpdate = true;
+    });
+  }
+  // Darker, rougher ground disc for the high vitrine; original slate for cheap.
+  ground.material.color.setHex(cfg.groundColor);
+  ground.material.roughness = cfg.groundRough;
+  contactShadow.visible = cfg.contactShadow;
+  refreshContactShadow();
   applyEnvMapIntensity(currentDragon, cfg.envMapIntensity);
 }
 
@@ -183,7 +321,35 @@ function rebuild() {
   // so the age slider scrubs a POSED dragon.
   currentRig = upgradeToSkinned(currentDragon);
   if (currentRig) applyPoseByName(currentPoseName);
+  // Refit the soft contact-shadow blob to the new silhouette (high tier only).
+  refreshContactShadow();
   updateReadout();
+}
+
+// Fit the camera to the live dragon's bounds at a pleasing 3/4 hero angle, sat a
+// touch below the eyeline so the creature reads "grand". Called on boot and after
+// wholesale genome swaps (archetype / randomize / reset) — NOT on age scrubbing,
+// so the camera holds steady while you scrub the years. `force` reframes even if
+// the user has already orbited (used by the explicit new-creature actions).
+function frameDragon(force = false) {
+  if (!currentDragon) return;
+  if (userMovedCamera && !force) return;
+  const box = new THREE.Box3().setFromObject(currentDragon);
+  if (box.isEmpty()) return;
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+  const fov = camera.fov * Math.PI / 180;
+  const dist = (radius / Math.sin(fov / 2)) * 1.28;   // a little breathing room
+  const dir = new THREE.Vector3(0.6, 0.28, 1).normalize();   // 3/4 front, slightly low
+  // Aim just below the vertical centre so head/upper body dominate the frame.
+  const target = new THREE.Vector3(center.x, box.min.y + size.y * 0.46, center.z);
+  camera.position.copy(target.clone().add(dir.multiplyScalar(dist)));
+  camera.near = dist / 100; camera.far = dist * 100;
+  camera.updateProjectionMatrix();
+  controls.target.copy(target);
+  controls.update();
+  userMovedCamera = false;   // programmatic frame is the new "home"
 }
 
 // Apply a named pose from the POSES table to the live rig (no-op if unskinned).
@@ -326,6 +492,7 @@ document.getElementById('btnRandom').addEventListener('click', () => {
   setArchetypeCustom();
   syncSliders();
   rebuild();
+  frameDragon(true);   // a fresh creature — reframe the hero shot
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {
@@ -337,10 +504,23 @@ document.getElementById('btnReset').addEventListener('click', () => {
   setArchetypeCustom();
   syncSliders();
   rebuild();
+  frameDragon(true);   // back to the default dragon — reframe
 });
 
 document.getElementById('btnExport').addEventListener('click', exportGLTF);
 document.getElementById('btnShot').addEventListener('click', screenshotPNG);
+
+// Reframe affordance: single click re-fits the hero shot (force, even after the
+// user has orbited); double click toggles a slow showcase turntable.
+const btnReframe = document.getElementById('btnReframe');
+if (btnReframe) {
+  btnReframe.addEventListener('click', () => { frameDragon(true); });
+  btnReframe.addEventListener('dblclick', () => {
+    controls.autoRotate = !controls.autoRotate;
+    controls.autoRotateSpeed = 0.6;
+    btnReframe.classList.toggle('on', controls.autoRotate);
+  });
+}
 
 const emotionSel = document.getElementById('emotion');
 for (const name of Object.keys(EMOTIONS)) {
@@ -409,6 +589,7 @@ archetypeSel.addEventListener('change', () => {
   genome = { ...src };
   syncSliders();
   rebuild();
+  frameDragon(true);   // new archetype subject — reframe the hero shot
 });
 document.getElementById('btnExportGeo').addEventListener('click', () => {
   const t = window.__testbed;
@@ -617,15 +798,24 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  // Keep the composer + its internal-target passes matched to the drawing buffer.
+  const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
+  composer.setSize(buf.x, buf.y);
+  gtaoPass.setSize(buf.x, buf.y);
+  bloomPass.setSize(buf.x, buf.y);
 }
 window.addEventListener('resize', resize);
 
 // Single render entry point — the animate loop, the PNG screenshot, and the
-// in-app gallery all route through here so a future EffectComposer post stack
-// plugs in at ONE site (per the spec's renderFrame() refactor). Today both tiers
-// draw straight to the canvas via renderer.render.
+// in-app gallery all route through here so the tier switch picks the path at ONE
+// site. HIGH renders through the EffectComposer (RenderPass → GTAO → bloom →
+// OutputPass, tone-mapped once by OutputPass); CHEAP draws straight to the canvas
+// via renderer.render (tone-mapped by the renderer). Both write the final frame to
+// the canvas, so canvas.toDataURL()/toBlob() (gallery + PNG) capture the composed
+// image either way.
 function renderFrame() {
-  renderer.render(scene, camera);
+  if (tierCfg().composer) composer.render();
+  else renderer.render(scene, camera);
 }
 
 const animClock = new THREE.Clock();
@@ -657,6 +847,7 @@ paintAgeFill();
 resize();
 applyTier();
 rebuild();
+frameDragon();   // frame-on-boot: fit the hero shot instead of the face close-up
 animate();
 
 // Expose a tiny debug hook for the orchestrator / console verification.
@@ -671,6 +862,16 @@ window.__testbed = {
   setRenderTier,
   get renderTier() { return window.__renderTier; },
   controls,
+  // Fit the camera to the dragon (3/4 hero). force=true reframes even if the user
+  // has orbited. Exposed for the console + the "reframe" affordance.
+  frameDragon,
+  // Slow showcase turntable (OrbitControls autoRotate; controls.update() already
+  // runs each animate() frame). setTurntable(true|false) or toggle.
+  setTurntable: (on, speed = 0.6) => {
+    controls.autoRotate = (on === undefined) ? !controls.autoRotate : !!on;
+    controls.autoRotateSpeed = speed;
+    return controls.autoRotate;
+  },
   // --- Pose API (Phase-0 animation) --------------------------------------
   poses: POSES,
   poseNames: POSE_NAMES,
