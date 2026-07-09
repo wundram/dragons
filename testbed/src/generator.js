@@ -350,6 +350,13 @@ const smoothstep = (t) => { t = clamp01(t); return t * t * (3 - 2 * t); };
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const EPS = 0.012; // below this envelope radius a part is treated as "absent"
 
+// Resolved WORLD ear length (base->tip) for a given head radius R + genome ear
+// size/length. Single source of truth so the ear BONE chain (buildSkeleton) and
+// the ear SHEET mesh (face.js) agree, and so the scale-hotfix clamp lives in one
+// place: length factor 1.35 (was 1.85), final extent clamped to <= 1.1x head Ø.
+export const resolveEarLen = (R, earSize, earLength) =>
+  Math.min(earSize * R * (earLength ?? 1) * 1.35, 2.2 * R);
+
 // Base (adult-neutral) dimensions. Everything scales off these.
 const U = {
   trunkHalf: 1.35,   // half-length of the trunk (shoulder..hip)
@@ -490,7 +497,7 @@ export function phenotype(genome, age = 0, env = {}) {
     // Ears stay a big cute signature at every age: baby = extra-large soft
     // floppy-forward flap; adult = sleeker but still substantial (never shrinks
     // into a nub). The flap width/length carry through unchanged.
-    earSize:    g.earSize * lerp(1.35, 1.05, s),             // bigger vs head on babies, still big adult
+    earSize:    g.earSize * lerp(0.70, 1.0, s),              // proportionate on babies, grows modestly with age
     earLength:  g.earLength,
     earWidth:   g.earWidth,
     earDroop:   clamp01(g.earDroop + lerp(0.22, 0.0, s)),    // floppier young
@@ -803,6 +810,30 @@ function buildSkeleton(p) {
   };
 
   for (const side of [-1, 1]) { buildForelimb(side); buildHindLeg(side); }
+
+  // ---- EARS: 3-bone chain per side (root->mid->tip), parented to `skull` -----
+  // Added for EVERY genome (fixed-topology invariant) — zero-length when earSize
+  // ~0, exactly like absent limbs. envelopeRadius 0 (< EPS) so the implicit
+  // field / voxelizer / nearest-bone candidate set all skip them: the body skin
+  // and skinIndex values are UNAFFECTED. Appended LAST so they never perturb the
+  // ordered body-bone indices. The main ear SHEET (face.js) skins to these; the
+  // chain rests straight up (+Y) — expression/age become bone rotations on top,
+  // matching the world-axis posing math the rigid ears already used.
+  const earLenW = resolveEarLen(R, p.earSize, p.earLength);
+  const earStep = Math.max(1e-3, earLenW / 3);
+  for (const side of [-1, 1]) {
+    const tag = side < 0 ? 'earL' : 'earR';
+    const rootP = skullPos.clone().add(V(side * R * 0.62, R * 0.55, -R * 0.10));
+    const midP = rootP.clone().add(V(0, earStep, 0));
+    const tipP = rootP.clone().add(V(0, 2 * earStep, 0));
+    const tipTail = rootP.clone().add(V(0, 3 * earStep, 0));
+    add({ name: `${tag}_root`, parent: 'skull', pos: rootP, tail: midP,
+          envelopeRadius: 0, rTail: 0, length: earStep, kind: 'ear' });
+    add({ name: `${tag}_mid`, parent: `${tag}_root`, pos: midP, tail: tipP,
+          envelopeRadius: 0, rTail: 0, length: earStep, kind: 'ear' });
+    add({ name: `${tag}_tip`, parent: `${tag}_mid`, pos: tipP, tail: tipTail,
+          envelopeRadius: 0, rTail: 0, length: earStep, kind: 'ear' });
+  }
 
   return { bones, byName, wings };
 }
@@ -1140,12 +1171,19 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   // Upper-rear-side of the skull sphere, base direction up-out-slightly-back.
   // Passed to the face rig, which builds/poses the ears (rotation-only). Absent
   // when earSize resolves to ~0 (genome-optional). fieldBody => sit proud of skin.
+  // Skinned deformable ears only in the smooth/high (Explorer) tier — the body is
+  // a SkinnedMesh there so rig.js can bind the ear sheet to its bone chain. Cheap
+  // tier and voxel/capsule modes keep the rigid plates (they bake to Bedrock bones).
+  const earSkinned = skinMode === 'smooth' && p.renderTier === 'high';
   const earOpts = (p.earSize * R) > 0.02 ? {
     size: p.earSize * R,
     length: p.earLength, width: p.earWidth,
     droop: p.earDroop, pointed: p.earPointed, pairs: p.earPairs,
     neutral: p.earNeutral,
     proud: fieldBody,
+    skinned: earSkinned,
+    headR: R,
+    earLen: resolveEarLen(R, p.earSize, p.earLength),
     anchors: [-1, 1].map((side) => ({
       pos: V(side * R * 0.62, R * 0.55, -R * 0.10),
       out: V(side * 0.75, 0.62, -0.22).normalize(),

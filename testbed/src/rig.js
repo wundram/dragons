@@ -29,6 +29,7 @@
 // degrades gracefully — no posing, no crash).
 
 import * as THREE from 'three';
+import { applyFaceParams } from './face.js';
 
 const HIP_IDX = 20;                 // pelvis vertebra = animation root (re-root here)
 const EPS = 0.012;                  // envelopeRadius below this => bone absent (matches generator/field)
@@ -193,6 +194,48 @@ export function upgradeToSkinned(dragon) {
     }
   }
 
+  // SKINNED EARS (smooth/high tier): each main ear is one smooth sheet authored
+  // in face.js with ANALYTIC skin weights against a LOCAL bone list
+  // [root,mid,tip,skull]. Remap those local indices to real skeleton indices,
+  // convert to SkinnedMesh, and RE-PARENT the sheet OUT of the skull-attached head
+  // group to the dragon root (so it is not double-transformed by both the head
+  // group and the ear bones), then bind below with the other extraSkins.
+  const faceRig = dragon.getObjectByName('faceRig');
+  const earInfo = faceRig && faceRig.userData && faceRig.userData.ears;
+  if (earInfo && earInfo.skinned) {
+    for (const it of earInfo.items) {
+      if (!it.skinned || !it.sheet || !it.boneNames) continue;
+      const mesh = it.sheet;
+      const localBones = [it.boneNames.root, it.boneNames.mid, it.boneNames.tip, 'skull'];
+      const map = localBones.map((nm) => boneIndex[nm] ?? boneIndex['skull'] ?? 0);
+      const siAttr = mesh.geometry.getAttribute('skinIndex');
+      if (siAttr) {
+        const src = siAttr.array;
+        const dst = new Uint16Array(src.length);
+        for (let k = 0; k < src.length; k++) dst[k] = map[src[k]] ?? 0;
+        mesh.geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(dst, 4));
+      }
+      dragon.attach(mesh);                       // preserve world xf out of the head group
+      const sm = new THREE.SkinnedMesh(mesh.geometry, mesh.material);
+      sm.name = mesh.name;
+      sm.frustumCulled = false;
+      sm.castShadow = mesh.castShadow;
+      sm.receiveShadow = mesh.receiveShadow;
+      sm.position.copy(mesh.position);
+      sm.quaternion.copy(mesh.quaternion);
+      sm.scale.copy(mesh.scale);
+      dragon.add(sm);
+      dragon.remove(mesh);
+      extraSkins.push(sm);
+      it.sheet = sm;
+      it.bones = {
+        root: boneObj[it.boneNames.root],
+        mid: boneObj[it.boneNames.mid],
+        tip: boneObj[it.boneNames.tip],
+      };
+    }
+  }
+
   // World matrices must be current BEFORE building the Skeleton (its bind
   // inverses read bone.matrixWorld) and before bone.attach (preserves world xf).
   dragon.updateMatrixWorld(true);
@@ -220,16 +263,29 @@ export function upgradeToSkinned(dragon) {
 
   dragon.updateMatrixWorld(true);
 
+  // The ear BONES now exist (skinned tier) — re-pose the ears from the last face
+  // params, since createFaceRig ran applyFaceParams before the skeleton existed
+  // (that pass could not touch bones). Poses the bone quaternions the sheet skins to.
+  if (faceRig && faceRig.userData.lastFaceParams) {
+    applyFaceParams(faceRig, faceRig.userData.lastFaceParams);
+  }
+
   // ---- 4. Pose API + idle state ---------------------------------------------
   // poseBase[name] = the current POSE target quaternion for each bone; the idle
   // layer composes a small time-varying delta ON TOP of it each frame.
   const poseBase = {};
   for (const b of ordered) poseBase[b.name] = new THREE.Quaternion();
 
-  // Ear roots (in the face rig) for the slight ear idle. Captured base quaternion
-  // is refreshed each frame by undoing the previous idle delta, so the emotion
-  // rig can still repose the ears without a fight.
+  // Ear idle: a slight wiggle. For SKINNED ears the idle drives the ear ROOT
+  // BONES (the sheet follows via skinning); for rigid ears it drives the ^ear[LR]
+  // groups. The captured base is refreshed each frame by undoing the previous idle
+  // delta, so the emotion rig can still repose the ears without a fight.
   const earIdle = [];
+  if (earInfo && earInfo.skinned) {
+    for (const it of earInfo.items) {
+      if (it.bones && it.bones.root) earIdle.push({ obj: it.bones.root, prev: new THREE.Quaternion() });
+    }
+  }
   if (head) {
     head.traverse((o) => {
       if (/^ear[LR]/.test(o.name)) earIdle.push({ obj: o, prev: new THREE.Quaternion() });

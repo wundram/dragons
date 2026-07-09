@@ -25,6 +25,8 @@ import * as MAT from './materials.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep01 = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+const _eEar = new THREE.Euler();
 
 // Face params shape (all optional; sensible defaults applied):
 //   eyeOpen    0..1   eyelid openness (1 wide, 0 shut)
@@ -167,23 +169,27 @@ function buildEars(rig, e, tier = 'high') {
   const pointed = clamp(e.pointed ?? 0.6, 0, 1);
   const pairs = Math.max(1, Math.min(3, Math.round(e.pairs ?? 1)));
   const proud = e.proud ? 1.04 : 1.0;
+  const skinned = !!e.skinned;                  // smooth/high tier -> deformable sheet
 
-  // Broad flap/fin-like ear PLATES (Toothless), not little pointed nubs: the base
-  // is wide and the width is HELD through the mid so the ear reads as a paddle that
-  // is a clear part of the head silhouette. It still tapers toward the tip (pointed)
-  // and is flattened in z (scale.z below) into a thin plate.
-  const earLen = size * length * 1.85;
+  // World ear length (base->tip). The scale-hotfix clamp (<= ~1.1x head Ø) is
+  // applied upstream in generator.resolveEarLen; the fallback keeps face.js usable
+  // standalone. Length factor is 1.35 (was 1.85), base width factor 0.52 (was 0.64
+  // so the base no longer wraps the skull).
+  const earLen = e.earLen ?? Math.min(size * length * 1.35, 2.2 * (e.headR ?? size));
   const baseLen = earLen * 0.5;
   const tipLen = earLen * 0.5;
-  const baseW = size * width * 0.64;   // broad base -> flap/fin, not a horn
-  const midW = baseW * 1.02;           // hold (slightly bulge) the width through the mid
-  const tipW = baseW * 0.48;           // taper toward a soft-ish tip
+  const baseW = size * width * 0.52;
+  const midW = baseW * 1.02;
+  const tipW = baseW * 0.48;
 
-  // shared geometry (built once); tinted plates. Inner-ear a pinker inset.
   const outerMat = MAT.earOuterMaterial(tier);
   const innerMat = MAT.earInnerMaterial(tier);
-  const baseGeo = earSegGeometry(baseLen, baseW, midW, 0.08);            // barely tapers (broad)
-  const tipGeo = earSegGeometry(tipLen, midW, tipW, pointed);           // tapers to the tip
+  const outerCol = outerMat.color.clone();
+  const innerCol = innerMat.color.clone();
+
+  // rigid plate geometry (trailing pairs, and the WHOLE ear in cheap/voxel tiers)
+  const baseGeo = earSegGeometry(baseLen, baseW, midW, 0.08);
+  const tipGeo = earSegGeometry(tipLen, midW, tipW, pointed);
   const innerGeo = earSegGeometry(baseLen * 0.94, baseW * 0.62, midW * 0.5, 0.25);
 
   const PAIR_SCALE = [1.0, 0.7, 0.5];
@@ -193,9 +199,35 @@ function buildEars(rig, e, tier = 'high') {
   for (let pi = 0; pi < pairs; pi++) {
     for (const anchor of e.anchors) {
       const side = anchor.pos.x < 0 ? -1 : 1;
+      const tag = side < 0 ? 'earL' : 'earR';
+
+      if (pi === 0 && skinned) {
+        // --- MAIN PAIR: one continuous smooth ear SHEET, skinned to the 3-bone
+        // chain (rig.js binds it). Inner ear is a vertex-color region on the sheet
+        // (no floating inset). The group sits at the SAME anchor the ear bones use
+        // (skull-local), so the bind-pose sheet aligns with the bone chain (+Y). ---
+        const group = new THREE.Group();
+        group.name = tag;
+        group.position.copy(anchor.pos).multiplyScalar(proud);
+        const geo = buildEarSheet(earLen, baseW, midW, tipW, pointed, outerCol, innerCol);
+        const sheetMat = outerMat.clone();
+        sheetMat.vertexColors = true;             // per-vertex outer/inner tint
+        sheetMat.color.setRGB(1, 1, 1);
+        const sheet = new THREE.Mesh(geo, sheetMat);
+        sheet.name = tag + '_sheet';
+        sheet.frustumCulled = false;
+        group.add(sheet);
+        rig.add(group);
+        items.push({
+          group, sheet, side, amp: PAIR_AMP[pi], skinned: true, bones: null,
+          boneNames: { root: `${tag}_root`, mid: `${tag}_mid`, tip: `${tag}_tip` },
+        });
+        continue;
+      }
+
+      // --- rigid 2-segment plate (trailing pairs, or the whole ear off-tier) ---
       const root = new THREE.Group();
-      root.name = `ear${side < 0 ? 'L' : 'R'}${pi ? '_' + pi : ''}`;
-      // trailing pairs cascade down-and-back along the skull, at reduced scale.
+      root.name = `${tag}${pi ? '_' + pi : ''}`;
       const back = pi * size * 0.9;
       root.position.copy(anchor.pos).multiplyScalar(proud)
         .add(new THREE.Vector3(0, -pi * size * 0.55, -back));
@@ -232,7 +264,73 @@ function buildEars(rig, e, tier = 'high') {
     items,
     neutral: e.neutral || { perk: 0.2, pitch: 0.0, flare: 0.1 },
     droop: clamp(e.droop ?? 0.25, 0, 1),
+    skinned,
   };
+}
+
+// One continuous smooth ear SHEET swept up +Y (base at y=0, tip at y=earLen),
+// flattened in z into a thin plate. NO base/tip seam (single run), so a graded
+// bone curl reads as a soft fold, not a hinge crease. Emits, per vertex:
+//   - position / color (outer hide tint, blended to the inner-ear tint on the
+//     FRONT (+z) broad face within a length window -> the inner ear is part of
+//     the sheet, no floating inset);
+//   - skinIndex/skinWeight authored analytically from the length parameter t,
+//     against the LOCAL bone list [root, mid, tip, skull] (indices 0..3). rig.js
+//     remaps those local indices to real skeleton indices at bind time. The base
+//     ring carries a little `skull` weight so the ear root stays seated.
+function buildEarSheet(earLen, baseW, midW, tipW, pointed, outerCol, innerCol) {
+  const T = 16;                    // length segments (smooth)
+  const RAD = 12;                  // radial segments
+  const zFlat = 0.34;              // thin plate
+  const pExp = lerp(0.7, 2.2, clamp(pointed, 0, 1));
+  const radiusFn = (t) => {
+    const w = lerp(baseW, tipW, t);
+    const point = Math.pow(1 - t, pExp);
+    return Math.max(1e-3, w * lerp(1, point, t));
+  };
+  const pos = [], col = [], si = [], sw = [];
+  const stride = RAD + 1;
+  const _c = new THREE.Color();
+  for (let i = 0; i <= T; i++) {
+    const t = i / T;
+    const y = t * earLen;
+    const r = radiusFn(t);
+    // analytic skin weights (shared across the ring): root(0) mid(1) tip(2) skull(3)
+    let wr, wm, wt;
+    if (t < 0.5) { const a = smoothstep01(t / 0.5); wr = 1 - a; wm = a; wt = 0; }
+    else { const a = smoothstep01((t - 0.5) / 0.5); wr = 0; wm = 1 - a; wt = a; }
+    const ws = t < 0.16 ? 0.4 * (1 - t / 0.16) : 0;   // seat the base ring to skull
+    const k = 1 - ws;
+    wr *= k; wm *= k; wt *= k;
+    // inner-ear window along the length (soft in near the base, out before the tip)
+    const along = smoothstep01((t - 0.08) / 0.16) * (1 - smoothstep01((t - 0.72) / 0.22));
+    for (let j = 0; j <= RAD; j++) {
+      const v = (j / RAD) * Math.PI * 2;
+      const x = r * Math.cos(v);
+      const z = r * Math.sin(v) * zFlat;
+      pos.push(x, y, z);
+      const front = Math.max(0, Math.sin(v));       // +z broad face = front of ear
+      const innerMask = front * along * 0.92;
+      _c.copy(outerCol).lerp(innerCol, innerMask);
+      col.push(_c.r, _c.g, _c.b);
+      si.push(0, 1, 2, 3);
+      sw.push(wr, wm, wt, ws);
+    }
+  }
+  const idx = [];
+  for (let i = 1; i <= T; i++) for (let j = 1; j <= RAD; j++) {
+    const a = stride * (i - 1) + (j - 1), b = stride * i + (j - 1),
+          c = stride * i + j, d = stride * (i - 1) + j;
+    idx.push(a, b, d, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
 }
 
 // One ear segment: a taperedTube swept up +Y, tip sharpness from `pointed` (0
@@ -467,6 +565,9 @@ function taperedTube(path, tubularSegments, radialSegments, radiusFn) {
 export function applyFaceParams(rig, params = {}) {
   if (!rig || !rig.userData.layout) return;
   const p = { ...DEFAULTS, ...params };
+  // Remember the last-applied params so rig.js can re-pose the ears once the ear
+  // BONES exist (createFaceRig runs this before the skeleton is built).
+  rig.userData.lastFaceParams = p;
   const { R, eyeR, spread, eyeForward } = rig.userData.layout;
 
   for (const side of [-1, 1]) {
@@ -527,8 +628,14 @@ export function applyFaceParams(rig, params = {}) {
     }
   }
 
-  // --- ears: pose each ear (base pivot + tip pivot) from the 3 expressive params
-  // composed onto the age-lerped neutral pose. Rotation-only — no geometry rebuild.
+  // --- ears: pose each ear from the 3 expressive params composed onto the
+  // age-lerped neutral pose. Rotation-only. TWO consumers, same math:
+  //   - SKINNED main pair (it.bones set by rig.js): a GRADED curl distributed
+  //     down the root->mid->tip bone chain (rotations compose in world, so the
+  //     shares ADD -> a smooth bend, not a single hinge crease); the sheet
+  //     follows via skinning.
+  //   - RIGID plate (trailing pairs, or the whole ear off-tier / pre-rig): the
+  //     original base-pivot + tip-pivot 2-group hinge.
   const ears = rig.userData.ears;
   if (ears) {
     const nP = ears.neutral, droop = ears.droop;
@@ -541,14 +648,25 @@ export function applyFaceParams(rig, params = {}) {
       const perkEff = ((perk + 1) / 2) * (1 - 0.5 * droop);
 
       const REST_FLARE = 0.42, REST_BACK = 0.1;
-      // base pivot (head axes): X = fore/aft lean, Y = slight toe on swivel, Z = splay.
-      const rotX = pitch * 0.95 - (perkEff - 0.45) * 0.4 - REST_BACK;
-      const rotY = it.side * pitch * 0.12;
-      const rotZ = -it.side * (REST_FLARE + flare * 0.9);
-      it.root.rotation.set(rotX, rotY, rotZ, 'ZYX');
-      // tip pivot: straight when pricked, folds forward/down when drooped or floppy.
-      const fold = lerp(1.75, 0.06, perkEff) + droop * 0.9;
-      it.tip.rotation.set(fold, 0, 0);
+      const swivelY = it.side * pitch * 0.12;
+      const flareZ = -it.side * (REST_FLARE + flare * 0.9);
+
+      if (it.bones && it.bones.root) {
+        // graded curl (increases toward the tip) replaces the single hinge; perk
+        // straightens it, droop/floppy deepens it.
+        const curl = lerp(1.55, 0.05, perkEff) + droop * 0.9;
+        const pitchX = pitch * 0.95 - REST_BACK;      // whole-ear fore/aft sweep
+        const { root, mid, tip } = it.bones;
+        root.quaternion.setFromEuler(_eEar.set(pitchX * 0.55 + curl * 0.15, swivelY, flareZ * 0.7, 'ZYX'));
+        mid.quaternion.setFromEuler(_eEar.set(pitchX * 0.25 + curl * 0.35, 0, flareZ * 0.25, 'ZYX'));
+        tip.quaternion.setFromEuler(_eEar.set(pitchX * 0.15 + curl * 0.50, 0, 0, 'ZYX'));
+      } else if (it.root && it.tip) {
+        // base pivot (head axes): X = fore/aft lean, Y = slight swivel, Z = splay.
+        const rotX = pitch * 0.95 - (perkEff - 0.45) * 0.4 - REST_BACK;
+        it.root.rotation.set(rotX, swivelY, flareZ, 'ZYX');
+        const fold = lerp(1.75, 0.06, perkEff) + droop * 0.9;
+        it.tip.rotation.set(fold, 0, 0);
+      }
     }
   }
 
