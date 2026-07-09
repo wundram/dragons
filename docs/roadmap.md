@@ -43,8 +43,9 @@
 - [x] **Bat-wing forelimb refactor + membrane** — strict tetrapod (`design/limb-and-wing-architecture.md`); archetypes snake/drake/wyvern/crawlerFlyer/grasper/eastern; proportion-tuned (big wings, chunky grasper, tamer robustness).
 - [x] **Expressive ears + optional face features** — ear rig (structural + `earPerk`/`earPitch`/`earFlare`, wired to emotions incl. new `afraid`/`sad`, age cute→cool); optional tusks/frill/barbels/brow-mods. `research/expressive-ears-and-features.md`.
 - [x] **CA feature system — phase 1** — `testbed/src/featureGrid.js` (stable (u,v) anchor lattice + `window.__showGrid` overlay) + activator–inhibitor CA markings → vertex colors / voxel tint; genome-driven, age-emergent, breeding-safe. `research/ca-feature-placement.md`.
-- [ ] **CA feature system — phase 2** — discrete geometry off the same grid + `peak` channel: spikes/ridges, feathers, scutes, dorsal sail (instanced, layered, voxel-degradable). `// TODO(phase2)` hooks in place.
-- [ ] **Polish**: bigger/more flap-like Toothless ears; crisper markings (denser grid rings); teeth/tongue/fangs on the jaw hook.
+- [x] **CA feature system — phase 2** — discrete geometry off the grid (`testbed/src/features.js`): spikes/ridges (blue-noise spaced, cell-size suppression), dorsal sail, feathers, scutes; age-emergent; voxel spike cubes bake into `geo.json`.
+- [x] **Polish**: bigger flap-like Toothless ears (still expressive/age-scaled); crisper markings via denser grid (K_AXIAL 12→22, ~824 cells) + hardened mask edge; spikes re-verified (spacing/suppression intact); ~36ms/regenerate.
+- [ ] **Remaining polish**: teeth/tongue/fangs on the jaw hook; feather/scute drama; ear micro-behavior (idle twitches).
 - [ ] **Wire the pose-sheet gallery** — weights exist; add a pose API + `poses` gallery mode; also unlocks the dramatic wing-spread rest pose.
 - [ ] Genome crossover control (breed two genomes → egg/baby) — mutation tree is the first step.
 - [ ] Human-in-the-loop tuning pass with the galleries.
