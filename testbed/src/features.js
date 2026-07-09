@@ -34,7 +34,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { mulberry32, hash2 } from './featureGrid.js';
+import { mulberry32, hash2, cellPositions, markingColorForPoint } from './featureGrid.js';
 import * as MAT from './materials.js';
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -235,6 +235,35 @@ function mergeToMesh(geos, mat, name) {
 }
 
 // ---------------------------------------------------------------------------
+// MARKING COHERENCE (item C): sample the body's CA marking colour at a feature's
+// anchor and blend it into the feature's keratin/feather base, so the body
+// pattern flows across the silhouette onto the features instead of stopping at
+// the skin. `ctx` (grid + marking mask + cell-position cache) is supplied only on
+// the smooth/high path; when absent the feature keeps its flat base colour.
+// ---------------------------------------------------------------------------
+function makeTintCtx(p, opts) {
+  if (opts.mode === 'voxel' || !opts.grid || !opts.marking) return null;
+  return { grid: opts.grid, marking: opts.marking, p,
+    cellPos: cellPositions(opts.grid), tmp: new THREE.Color() };
+}
+// featureBase blended `blend` of the way toward the local body marking colour.
+function sampleFeatureTint(base, pos, ctx, blend) {
+  if (!ctx) return base;
+  markingColorForPoint(pos.x, pos.y, pos.z, ctx.grid, ctx.marking, ctx.p, ctx.cellPos, ctx.tmp);
+  return base.clone().lerp(ctx.tmp, blend);
+}
+// Stamp a single colour onto every vertex of a geometry (for merged cone/skirt runs).
+function setGeoColor(geo, color) {
+  const n = geo.getAttribute('position').count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { arr[i * 3] = color.r; arr[i * 3 + 1] = color.g; arr[i * 3 + 2] = color.b; }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(arr, 3));
+}
+// Flip a merged/loose feature material to consume per-vertex marking colours
+// (white base so the vertex colour is the final albedo; PBR channels preserved).
+function enableVertexColors(mat) { mat.vertexColors = true; mat.color.setRGB(1, 1, 1); }
+
+// ---------------------------------------------------------------------------
 // buildFeatureMeshes(state, p, opts) -> THREE.Group('features')
 // ---------------------------------------------------------------------------
 // opts.mode: 'voxel' renders cheap cube stacks (matching the geo.json bake);
@@ -247,6 +276,8 @@ export function buildFeatureMeshes(state, p, opts = {}) {
   const spikeGrow = p.spikeGrow ?? 1;
   const featherGrow = p.featherGrow ?? 1;
   const scuteGrow = p.scuteGrow ?? 1;
+  // Marking-coherence context (null in voxel/cheap path -> flat feature colours).
+  const ctx = makeTintCtx(p, opts);
 
   // ============================ SPIKES + SAIL ===============================
   if (voxel) {
@@ -267,17 +298,35 @@ export function buildFeatureMeshes(state, p, opts = {}) {
     const sailMesh = mergeToMesh(sailGeos, sailMaterial(p), 'sail');
     if (sailMesh) group.add(sailMesh);
   } else if (spikeGrow > 0.02 && state.spikes.length) {
-    // Cones oriented to the normal, tilted back; merged into one mesh.
+    // Cones oriented to the normal, tilted back; merged into one mesh. Each spike
+    // is tinted by the local body marking colour (item C) and its root is SUNK
+    // into the skin + given a short flared collar so it emerges FROM the body
+    // rather than floating on a tangent circle (item F).
+    const spikeMat = spikeMaterial(p);
+    const spikeBase = spikeMat.color.clone();
+    if (ctx) enableVertexColors(spikeMat);
     const geos = [];
     for (const s of state.spikes) {
       const { h, r } = spikeSize(s, p);
       if (h < 1e-3) continue;
-      const g = new THREE.ConeGeometry(Math.max(r, 1e-3), h, 7, 1);
-      g.translate(0, h / 2, 0);   // base at origin, tip at +h
-      orientAndPlace(g, spikeDir(s.normal, s.tangent), s.pos);
-      geos.push(g);
+      const dir = spikeDir(s.normal, s.tangent);
+      const tint = sampleFeatureTint(spikeBase, s.pos, ctx, 0.5);
+      const sink = h * 0.16;                          // root buried below the surface
+      const cone = new THREE.ConeGeometry(Math.max(r, 1e-3), h, 8, 1);
+      cone.translate(0, h / 2 - sink, 0);             // base sunk, tip at +h-sink
+      orientAndPlace(cone, dir, s.pos);
+      if (ctx) setGeoColor(cone, tint);
+      geos.push(cone);
+      // base fairing skirt: a short flared collar (r -> r*1.55) rooted at the sink
+      // depth, giving GTAO a crevice and reading as a fillet into the skin.
+      const skirtH = Math.max(h * 0.3, r * 0.7);
+      const skirt = new THREE.CylinderGeometry(Math.max(r, 1e-3), Math.max(r * 1.55, 1e-3), skirtH, 8, 1);
+      skirt.translate(0, skirtH / 2 - sink, 0);
+      orientAndPlace(skirt, dir, s.pos);
+      if (ctx) setGeoColor(skirt, tint);
+      geos.push(skirt);
     }
-    const spikeMesh = mergeToMesh(geos, spikeMaterial(p), 'spikes');
+    const spikeMesh = mergeToMesh(geos, spikeMat, 'spikes');
     if (spikeMesh) {
       // Bone tags + placement for future per-bone animation / provenance.
       spikeMesh.userData.featureCells = state.spikes.map((s) => ({
@@ -289,11 +338,17 @@ export function buildFeatureMeshes(state, p, opts = {}) {
     // ---- DORSAL SAIL: a double-sided membrane between consecutive dorsal
     // spikes (gated by crestSail). Each pair -> a quad (base_i, tip_i,
     // tip_{i+1}, base_{i+1}); the tips ride partway up the spike so the sail
-    // reads as webbing stretched along the ridge. ----------------------------
+    // reads as webbing stretched along the ridge. The root is sunk INTO the body
+    // and its base verts take the local body colour so the base seam fairs away
+    // (item F); the tips take the sail tint blended with the marking (item C). ---
     const crest = p.crestSail ?? 0;
     if (crest > 0.05 && state.sailCells.length >= 2) {
+      const sailMat = sailMaterial(p);
+      const sailBase = sailMat.color.clone();
+      if (ctx) enableVertexColors(sailMat);
       const pos = [];
-      const push = (v) => pos.push(v.x, v.y, v.z);
+      const col = [];
+      const pushC = (v, c) => { pos.push(v.x, v.y, v.z); col.push(c.r, c.g, c.b); };
       const sc = state.sailCells;
       for (let i = 0; i + 1 < sc.length; i++) {
         const a = sc[i], b = sc[i + 1];
@@ -301,18 +356,25 @@ export function buildFeatureMeshes(state, p, opts = {}) {
         if (Math.abs((a.u ?? 0) - (b.u ?? 0)) > 4) continue;
         const ha = spikeSize(a, p), hb = spikeSize(b, p);
         const sailH = crest * spikeGrow;
-        const baseA = a.pos, baseB = b.pos;
+        // roots sunk along -normal so the base disappears into the back (no raw seam).
+        const baseA = a.pos.clone().addScaledVector(a.normal, -a.radius * 0.14);
+        const baseB = b.pos.clone().addScaledVector(b.normal, -b.radius * 0.14);
         const tipA = a.pos.clone().addScaledVector(spikeDir(a.normal, a.tangent), ha.h * sailH);
         const tipB = b.pos.clone().addScaledVector(spikeDir(b.normal, b.tangent), hb.h * sailH);
-        // two triangles for the quad
-        push(baseA); push(tipA); push(tipB);
-        push(baseA); push(tipB); push(baseB);
+        // root verts = local body colour (fully faired into skin); tips = sail tint.
+        const rA = ctx ? sampleFeatureTint(sailBase, a.pos, ctx, 1.0) : sailBase;
+        const rB = ctx ? sampleFeatureTint(sailBase, b.pos, ctx, 1.0) : sailBase;
+        const tA = ctx ? sampleFeatureTint(sailBase, a.pos, ctx, 0.4) : sailBase;
+        const tB = ctx ? sampleFeatureTint(sailBase, b.pos, ctx, 0.4) : sailBase;
+        pushC(baseA, rA); pushC(tipA, tA); pushC(tipB, tB);
+        pushC(baseA, rA); pushC(tipB, tB); pushC(baseB, rB);
       }
       if (pos.length) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        if (ctx) geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
         geo.computeVertexNormals();
-        const sail = new THREE.Mesh(geo, sailMaterial(p));
+        const sail = new THREE.Mesh(geo, sailMat);
         sail.name = 'sail';
         group.add(sail);
       }
@@ -321,8 +383,12 @@ export function buildFeatureMeshes(state, p, opts = {}) {
 
   // ============================ FEATHERS ====================================
   if (!voxel && featherGrow > 0.02 && state.feathers.length) {
+    const featherMat = featherMaterial(p);
+    const featherBase = featherMat.color.clone();
+    if (ctx) enableVertexColors(featherMat);
     const pos = [];
-    const push = (v) => pos.push(v.x, v.y, v.z);
+    const col = [];
+    const pushC = (v, c) => { pos.push(v.x, v.y, v.z); col.push(c.r, c.g, c.b); };
     const len0 = FEATHER_LEN_BASE * lerp(0.4, 1.3, clamp01(p.featherLength ?? 0.5));
     const _lat = new THREE.Vector3();
     for (const f of state.feathers) {
@@ -336,14 +402,16 @@ export function buildFeatureMeshes(state, p, opts = {}) {
       const b1 = base.clone().addScaledVector(_lat, -w * 0.5);
       const t0 = tip.clone().addScaledVector(_lat, w * 0.12);
       const t1 = tip.clone().addScaledVector(_lat, -w * 0.12);
-      push(b0); push(b1); push(t1);
-      push(b0); push(t1); push(t0);
+      const tint = ctx ? sampleFeatureTint(featherBase, f.pos, ctx, 0.55) : featherBase;
+      pushC(b0, tint); pushC(b1, tint); pushC(t1, tint);
+      pushC(b0, tint); pushC(t1, tint); pushC(t0, tint);
     }
     if (pos.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      if (ctx) geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
       geo.computeVertexNormals();
-      const mesh = new THREE.Mesh(geo, featherMaterial(p));
+      const mesh = new THREE.Mesh(geo, featherMat);
       mesh.name = 'feathers';
       mesh.userData.featureCells = state.feathers.map((f) => ({ boneName: f.boneName }));
       group.add(mesh);
@@ -352,8 +420,12 @@ export function buildFeatureMeshes(state, p, opts = {}) {
 
   // ============================ SCUTES ======================================
   if (!voxel && scuteGrow > 0.02 && state.scutes.length) {
+    const scuteMat = scuteMaterial(p);
+    const scuteBase = scuteMat.color.clone();
+    if (ctx) enableVertexColors(scuteMat);
     const pos = [];
-    const push = (v) => pos.push(v.x, v.y, v.z);
+    const col = [];
+    const pushC = (v, c) => { pos.push(v.x, v.y, v.z); col.push(c.r, c.g, c.b); };
     const r0 = SCUTE_R_BASE * lerp(0.5, 1.5, clamp01(p.scaleSize ?? 0.5));
     const _a = new THREE.Vector3();
     const _b = new THREE.Vector3();
@@ -368,18 +440,20 @@ export function buildFeatureMeshes(state, p, opts = {}) {
       // flat-shaded facets catch light and read as a distinct hard plate/scute.
       const rim = sc.pos.clone().addScaledVector(sc.normal, r * 0.05);
       const apex = sc.pos.clone().addScaledVector(sc.normal, r * 0.42);
+      const tint = ctx ? sampleFeatureTint(scuteBase, sc.pos, ctx, 0.6) : scuteBase;
       for (let k = 0; k < SEG; k++) {
         const a0 = (k / SEG) * Math.PI * 2, a1 = ((k + 1) / SEG) * Math.PI * 2;
         const c0 = rim.clone().addScaledVector(_a, Math.cos(a0) * r).addScaledVector(_b, Math.sin(a0) * r);
         const c1 = rim.clone().addScaledVector(_a, Math.cos(a1) * r).addScaledVector(_b, Math.sin(a1) * r);
-        push(apex); push(c0); push(c1);
+        pushC(apex, tint); pushC(c0, tint); pushC(c1, tint);
       }
     }
     if (pos.length) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      if (ctx) geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
       geo.computeVertexNormals();
-      const mesh = new THREE.Mesh(geo, scuteMaterial(p));
+      const mesh = new THREE.Mesh(geo, scuteMat);
       mesh.name = 'scutes';
       mesh.userData.featureCells = state.scutes.map((s) => ({ boneName: s.boneName }));
       group.add(mesh);

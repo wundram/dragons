@@ -174,6 +174,30 @@ export function scuteMaterial(p, tier = 'high') {
 // FACE materials (eyes / brows / mouth / ears / frill). Threaded `tier` from
 // createFaceRig(opts.tier).
 // ---------------------------------------------------------------------------
+// Phenotype-driven face part colours so ears/brows/mouth/frill read as GROWN from
+// the same body hue instead of hard-coded browns pasted on a pastel body (the
+// single biggest coherence failure per the rendering review). Passed to the
+// factories below via createFaceRig(opts.faceColors); each factory falls back to
+// its original hard-coded tint when no colour is supplied (so eye-only rigs and
+// old call sites stay unchanged).
+export function faceColors(p) {
+  const h = p.hue, s = p.sat, l = p.light;
+  return {
+    // mouth interior: a dark warm multiply of the local skin tone (reads as a
+    // shaded crease in the face, not a floating brown sticker).
+    mouth:    new THREE.Color().setHSL(h, clamp01(s * 0.65), clamp01(l * 0.22)),
+    // brow: a deep shade of the body hue.
+    brow:     new THREE.Color().setHSL((h + 0.02) % 1, clamp01(s * 0.5), clamp01(l * 0.42)),
+    // ear outer: body hue, a touch darker / desaturated (grown hide).
+    earOuter: new THREE.Color().setHSL(h, clamp01(s * 0.8), clamp01(l * 0.72)),
+    // ear inner: body hue blended toward warm rose (fleshy backlit inner ear).
+    earInner: new THREE.Color().setHSL(h, clamp01(s * 0.85), clamp01(l * 0.9))
+                .lerp(new THREE.Color(0xd98a8a), 0.5),
+    // frill: membrane-family tint of the body hue.
+    frill:    new THREE.Color().setHSL((h + 0.02) % 1, clamp01(s * 0.9), clamp01(l * 0.7)),
+  };
+}
+
 // Sclera — wet white, high-spec clearcoat gives the catchlight under IBL + rim.
 export function eyeWhiteMaterial(tier = 'high') {
   if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0 });
@@ -190,42 +214,47 @@ export function pupilMaterial(tier = 'high') {
     envMapIntensity: 1.0,
   });
 }
-// Brow — matte skin-dark ridge.
-export function browMaterial(tier = 'high') {
-  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: 0x2a2320, roughness: 0.55, metalness: 0 });
-  return new THREE.MeshPhysicalMaterial({ color: 0x2a2320, roughness: 0.5, metalness: 0, clearcoat: 0.12, envMapIntensity: 0.5 });
+// Brow — matte ridge; `color` (phenotype brow shade) overrides the default.
+export function browMaterial(tier = 'high', color) {
+  const c = color ?? new THREE.Color(0x2a2320);
+  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0 });
+  return new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.5, metalness: 0, clearcoat: 0.12, envMapIntensity: 0.5 });
 }
-// Mouth interior — wet.
-export function mouthMaterial(tier = 'high') {
-  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: 0x2a0d10, roughness: 0.5, metalness: 0, side: THREE.DoubleSide });
+// Mouth interior — wet; `color` (dark multiply of local skin) overrides the default.
+export function mouthMaterial(tier = 'high', color) {
+  const c = color ?? new THREE.Color(0x2a0d10);
+  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, metalness: 0, side: THREE.DoubleSide });
   return new THREE.MeshPhysicalMaterial({
-    color: 0x2a0d10, roughness: 0.5, metalness: 0, side: THREE.DoubleSide,
+    color: c, roughness: 0.5, metalness: 0, side: THREE.DoubleSide,
     clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.6,
   });
 }
-// Ear outer plate — body-dark hide with slight transmission (thin, backlit glow).
-export function earOuterMaterial(tier = 'high') {
-  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: 0x4a3b38, roughness: 0.6, metalness: 0 });
+// Ear outer plate — hide with slight transmission; `color` overrides the default.
+export function earOuterMaterial(tier = 'high', color) {
+  const c = color ?? new THREE.Color(0x4a3b38);
+  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0 });
   return new THREE.MeshPhysicalMaterial({
-    color: 0x4a3b38, roughness: 0.6, metalness: 0, side: THREE.DoubleSide,
+    color: c, roughness: 0.6, metalness: 0, side: THREE.DoubleSide,
     transmission: 0.2, thickness: 0, ior: 1.4, transparent: false, opacity: 1,
     envMapIntensity: HIGH_ENV_INTENSITY,
   });
 }
-// Ear inner — pinker inset, more transmissive (fleshy backlit ear).
-export function earInnerMaterial(tier = 'high') {
-  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: 0x9a5f63, roughness: 0.7, metalness: 0 });
+// Ear inner — pinker inset, more transmissive; `color` overrides the default.
+export function earInnerMaterial(tier = 'high', color) {
+  const c = color ?? new THREE.Color(0x9a5f63);
+  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: 0 });
   return new THREE.MeshPhysicalMaterial({
-    color: 0x9a5f63, roughness: 0.7, metalness: 0, side: THREE.DoubleSide,
+    color: c, roughness: 0.7, metalness: 0, side: THREE.DoubleSide,
     transmission: 0.3, thickness: 0, ior: 1.4, transparent: false, opacity: 1,
     envMapIntensity: HIGH_ENV_INTENSITY,
   });
 }
-// Frill petals — thin fleshy fan, slight transmission.
-export function frillMaterial(tier = 'high') {
-  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: 0x6a4a52, roughness: 0.7, metalness: 0, side: THREE.DoubleSide });
+// Frill petals — thin fleshy fan; `color` (membrane-family tint) overrides default.
+export function frillMaterial(tier = 'high', color) {
+  const c = color ?? new THREE.Color(0x6a4a52);
+  if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: 0, side: THREE.DoubleSide });
   return new THREE.MeshPhysicalMaterial({
-    color: 0x6a4a52, roughness: 0.65, metalness: 0, side: THREE.DoubleSide,
+    color: c, roughness: 0.65, metalness: 0, side: THREE.DoubleSide,
     transmission: 0.25, thickness: 0, ior: 1.4, transparent: false, opacity: 1,
     envMapIntensity: HIGH_ENV_INTENSITY,
   });
