@@ -57,7 +57,9 @@ The test bed graduates into the **Dragon Explorer** app. Pursue **top-tier anima
 - **Skeletal animation** on the existing stable bones + field-softmax skin weights: pose API, procedural gaits (walk/run), flight, IK (foot placement, look-at), secondary motion (wings/membrane, ears, tail).
 - **Behavior state machine** over: resting, roosting, standing, posturing, begging, playing, walking, running, flying — with smooth transitions + idle variety.
 - Unlocks the deferred **pose-sheet gallery** and the dramatic spread-wing pose.
-- Research-first: `research/procedural-animation-behavior.md` → Opus build.
+- Research: `research/procedural-animation-behavior.md`.
+- [x] **Phase 0 (foundation) DONE** — `testbed/src/rig.js` (Bone tree from `userData.skeleton`, pelvis re-rooting, body→`SkinnedMesh` bound to existing skin weights; layered wings/ears/spikes/face follow bones) + `testbed/src/poses.js` (pose API + POSES: idle/stand/rear-up/wings-open/roar/curl-sleep/walk-contact) + `gallery.mjs poses` sheet + gentle breathing/tail-sway idle. Verified across wyvern/drake/snake. Voxel degrades gracefully (unposed).
+- [ ] Next: gaits/IK (walk/run, morphology-adaptive) → flapping flight + spring secondary motion → behavior FSM (the 9 behaviors).
 
 ### 3b. High-fidelity rendering upgrade
 - PBR materials, environment/IBL lighting, better shadows, post-processing (AO/bloom/tone-map), membrane/feather/fur shading, nicer ground/environment.
