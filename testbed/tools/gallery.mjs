@@ -196,7 +196,9 @@ async function shootPose(genome, age, pose, file) {
     cam.near = dist / 100; cam.far = dist * 100;
     cam.lookAt(center); cam.updateProjectionMatrix();
     if (t.controls) { t.controls.target.copy(center); t.controls.update(); }
-    t.renderer.render(t.scene, cam);
+    // Route through renderFrame() so the pose still goes through the tier's
+    // post-fx composer (HIGH) instead of a raw un-tone-mapped renderer.render.
+    t.renderFrame();
   }, { genome, age, pose });
   await new Promise(r => setTimeout(r, 200));
   const clip = await page.evaluate(() => {
