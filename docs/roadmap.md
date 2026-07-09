@@ -50,11 +50,26 @@
 - [ ] Genome crossover control (breed two genomes → egg/baby) — mutation tree is the first step.
 - [ ] Human-in-the-loop tuning pass with the galleries.
 
-## Phase 3 — Generate & tune
-- Produce candidate dragons across the trait space.
-- Score, gather human feedback, tune rules/genome encoding.
-- Lock a genome schema and a growth ruleset that reliably produce good dragons.
+## Phase 3 — Dragon Explorer (NEW flagship target; see `design/mission.md`)
+The test bed graduates into the **Dragon Explorer** app. Pursue **top-tier animation & rendering** here (fidelity can be reduced for downstream targets later). Three tracks:
 
-## Phase 4 — Mod design
-- Design the real mod: genome storage/sync, tick-based growth, taming/feeding/training/breeding hooks, face rig, wild (fixed) vs pet (evolving) split, LOD & budget.
-- Choose loader/version, model runtime, and integration path.
+### 3a. Procedural animation + behavior (the foundation — dragons must MOVE)
+- **Skeletal animation** on the existing stable bones + field-softmax skin weights: pose API, procedural gaits (walk/run), flight, IK (foot placement, look-at), secondary motion (wings/membrane, ears, tail).
+- **Behavior state machine** over: resting, roosting, standing, posturing, begging, playing, walking, running, flying — with smooth transitions + idle variety.
+- Unlocks the deferred **pose-sheet gallery** and the dramatic spread-wing pose.
+- Research-first: `research/procedural-animation-behavior.md` → Opus build.
+
+### 3b. High-fidelity rendering upgrade
+- PBR materials, environment/IBL lighting, better shadows, post-processing (AO/bloom/tone-map), membrane/feather/fur shading, nicer ground/environment.
+- Research-first: `research/high-fidelity-rendering.md` → Opus build. Keep a cheap tier for MC.
+
+### 3c. Breeding mechanics + Explorer UX
+- Two-parent genome crossover → egg/baby; inheritance view; family tree. (Genome already supports it; mutation-tree gallery is the first step.)
+- Explorer app shell: pick/breed/watch dragons; camera; behavior selector.
+
+### Remaining creature polish (parallel, low priority)
+- Teeth/tongue/fangs on the jaw hook; feather/scute drama; ear micro-behavior.
+
+## Phase 4 — Downstream targets (later, reduced fidelity)
+- Standalone game/simulator on the same engine.
+- Minecraft mod: genome→NBT sync, tick-based growth, taming/feeding/training/breeding hooks, wild (fixed) vs pet (evolving) split, LOD & budget, baked animation on the stable bones. (Voxel skin + `geo.json` path already exists.)

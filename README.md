@@ -1,6 +1,8 @@
-# Dragons — procedurally-grown dragon pets for Minecraft
+# Dragons — a procedural dragon system
 
-A Minecraft mod that adds **dragon pets with procedurally generated, evolving 3D models**. Instead of a fixed model, each dragon is described by a compact **genome of traits**; a rule-based growth function advances the model over time so a hatchling visibly grows into an adult, shaped by care, feeding, training, and environment. Two dragons can breed to combine genomes into a new egg.
+A **target-agnostic procedural dragon engine**: each dragon is a compact **genome of traits** over one stable skeleton + body-anchored feature grid, producing a complete, deterministic, breedable, age-evolving creature (body plan, bat-wings, expressive face/ears, spikes/sail/feathers/scutes, coloration). A rule-based growth function advances the model over time so a hatchling visibly grows into an adult; two dragons can breed to combine genomes into a new egg.
+
+**Target apps (priority order):** (1) the **Dragon Explorer** — our flagship standalone showcase app pursuing *top-tier animation & rendering*, with breeding mechanics and dragons doing procedural behaviors (resting, roosting, standing, posturing, begging, playing, walking, running, flying); (2) a standalone game/simulator; (3) a **Minecraft mod** at reduced fidelity (voxel skin + `geo.json`). See `design/mission.md`. The engine keeps **fidelity tiers** so each target scales the skin/animation/shading while sharing the same genome + skeleton.
 
 ## Core ideas
 
