@@ -41,6 +41,7 @@ import {
   buildFeatureGrid, runMarkingCA, applyMarkingColors,
   markingColorForPoint, cellPositions, buildGridOverlay,
 } from './featureGrid.js';
+import { buildFeatureState, buildFeatureMeshes } from './features.js';
 
 // ---------------------------------------------------------------------------
 // GENOME_SCHEMA
@@ -141,6 +142,36 @@ export const GENOME_SCHEMA = [
     description: 'Per-dragon PRNG seed for the marking CA (uniqueness). Breeds by inheriting/hashing parents.' },
   { name: 'featurePlasticity', min: 0.4, max: 2.2, default: 1.0, group: 'Markings',
     description: 'How fast the feature CA advances with age (pattern analogue of maturationRate).' },
+
+  // --- Spikes / dorsal ridge (PHASE 2 discrete CA features; see features.js) --
+  // Instanced cones on the back/tail, spaced by lateral inhibition, suppressed by
+  // fat (big cells), emerging + sharpening with age. crestSail webs them into a fin.
+  { name: 'spikeAmount',   min: 0.0, max: 1.0, default: 0.4, group: 'Spikes',
+    description: 'Overall dorsal/tail spike potential. 0 = smooth back, 1 = dense spiny ridge.' },
+  { name: 'spikeSpacing',  min: 0.3, max: 3.0, default: 1.0, group: 'Spikes',
+    description: 'Lateral-inhibition spacing: low = crowded row, high = sparse, well-separated spikes.' },
+  { name: 'spikeSharpness',min: 0.0, max: 1.0, default: 0.6, group: 'Spikes',
+    description: 'Cone slenderness / tip acuity: 0 = stubby nub, 1 = long sharp spine.' },
+  { name: 'spikeGrowthAge',min: 0.0, max: 1.0, default: 0.35, group: 'Spikes',
+    description: 'Age at which spikes emerge & sharpen (cute→cool timing). Baby has none.' },
+  { name: 'crestSail',     min: 0.0, max: 1.0, default: 0.2, group: 'Spikes',
+    description: 'How strongly adjacent dorsal spikes web into a membrane sail/fin along the spine.' },
+  { name: 'spikeRegionBias',min: 0.0, max: 1.0, default: 0.7, group: 'Spikes',
+    description: 'Spike spread: 0 = strict back ridge only, 1 = spills down onto flanks.' },
+
+  // --- Feathers / coat (PHASE 2) --------------------------------------------
+  { name: 'featherCoverage',min: 0.0, max: 1.0, default: 0.0, group: 'Feathers',
+    description: 'Feather vs bare-scale dominance: 0 = scaly dragon, 1 = feathered tufts.' },
+  { name: 'featherRegionBias',min: 0.0, max: 1.0, default: 0.5, group: 'Feathers',
+    description: 'Feather tract: 0 = neck/shoulder ruff, 1 = tail (+wing-arm).' },
+  { name: 'featherLength', min: 0.0, max: 1.0, default: 0.5, group: 'Feathers',
+    description: 'Feather card length.' },
+
+  // --- Scales / plating (PHASE 2) -------------------------------------------
+  { name: 'scaleSize',     min: 0.0, max: 1.0, default: 0.5, group: 'Scales',
+    description: 'Base scute/plate lens size (interacts with cell area).' },
+  { name: 'scutePlating',  min: 0.0, max: 1.0, default: 0.3, group: 'Scales',
+    description: 'Belly/flank hard-plate (discrete scute) amount. 0 = smooth belly.' },
 
   // --- Face expression (drives the eye+brow rig directly) -------------------
   { name: 'eyeOpen',   min: 0.0, max: 1.0, default: 1.0, group: 'Face',
@@ -426,6 +457,25 @@ export function phenotype(genome, age = 0, env = {}) {
     markingHue:        g.markingHue,
     patternSeed:       g.patternSeed,
     featurePlasticity: g.featurePlasticity,
+
+    // --- DISCRETE FEATURES (phase 2): spikes / sail / feathers / scutes -------
+    // The trait numbers are the ADULT destination (pass-through); AGE drives
+    // emergence via the *Grow gates so features are absent/tiny on the baby and
+    // grow/sharpen with maturity (cute→cool). featurePlasticity biases timing.
+    spikeAmount:     g.spikeAmount,
+    spikeSpacing:    g.spikeSpacing,
+    spikeSharpness:  g.spikeSharpness * lerp(0.4, 1.0, s),   // rounder young, sharper adult
+    crestSail:       g.crestSail,
+    spikeRegionBias: g.spikeRegionBias,
+    // emergence gates (smoothstep past each growth age, sped by featurePlasticity).
+    spikeGrow:   smoothstep(clamp01((e - g.spikeGrowthAge) / (0.42 / Math.max(0.4, g.featurePlasticity)))),
+    featherGrow: smoothstep(clamp01((e - 0.18) / (0.5 / Math.max(0.4, g.featurePlasticity)))),
+    scuteGrow:   smoothstep(clamp01((e - 0.12) / 0.5)),
+    featherCoverage:   g.featherCoverage,
+    featherRegionBias: g.featherRegionBias,
+    featherLength:     g.featherLength,
+    scaleSize:         g.scaleSize,
+    scutePlating:      g.scutePlating,
 
     // --- EARS (structural, age-scaled): baby = big soft floppy-forward, adult =
     //     sleeker, sharper, swept-back. The NEUTRAL pose lerps with age; the
@@ -934,9 +984,15 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const featureGrid = buildFeatureGrid(bones);
   const markingState = runMarkingCA(featureGrid, p, age, env);
   dragon.userData.featureGrid = featureGrid;      // for debug overlay / geo.json export
-  // TODO(phase2): buildSpikeMeshes(featureGrid, markingState, p) / feathers /
-  // scutes read this SAME grid + markingState.peak (thresholded activator) to
-  // instance discrete geometry oriented to cell.normal/cell.tangent. Not built yet.
+  // PHASE 2: DISCRETE feature geometry (spikes/sail/feathers/scutes) selected off
+  // the SAME lattice. `featureState` is the age-INDEPENDENT selection (which cells
+  // carry each feature); the age-driven emergence lives in the phenotype gates.
+  // The meshes are added as a separate layered `features` group below (after the
+  // wings), NOT fed through the implicit field — so the body stays clean and the
+  // thin features stay crisp in every skin mode. Stored on userData so the
+  // geo.json exporter can bake the voxel spike cubes regardless of skin mode.
+  const featureState = buildFeatureState(featureGrid, p);
+  dragon.userData.featureState = featureState;
 
   // Skin mode: 'smooth' = implicit-field + marching-cubes single mesh (default);
   // 'voxel'  = greedy-voxelized cuboids from the SAME field (Minecraft-native,
@@ -1162,6 +1218,18 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   }
   dragon.add(wings);
 
+  // ---- DISCRETE FEATURES (phase 2): spikes / crest sail / feathers / scutes.
+  // A separate layered/merged mesh group (like the wing membrane), oriented to
+  // cell normals/tangents and bone-tagged. In voxel mode the spikes render as
+  // cheap protruding cube stacks (matching the geo.json bake). Toggle off for
+  // debugging via window.__noFeatures. ------------------------------------------
+  const noFeatures = env.noFeatures
+    ?? (typeof window !== 'undefined' ? window.__noFeatures : undefined) ?? false;
+  if (!noFeatures) {
+    const features = buildFeatureMeshes(featureState, p, { mode: skinMode });
+    if (features.children.length) dragon.add(features);
+  }
+
   // ---- optional rig debug overlay -----------------------------------------
   const showRig = env.showRig ?? (typeof window !== 'undefined' && window.__showRig);
   if (showRig) dragon.add(buildRigOverlay(bones, byName));
@@ -1193,7 +1261,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     genome: { ...genome }, age, env, phenotype: p, skeleton: bones,
     skinMode, fieldStats: dragon.userData.fieldStats,
     voxelCubes: dragon.userData.voxelCubes,
-    featureGrid, markingState,
+    featureGrid, markingState, featureState,
   };
   return dragon;
 }
