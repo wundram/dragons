@@ -34,10 +34,17 @@ const lerp = (a, b, t) => a + (b - a) * t;
 //   browCurve -1..1   brow arch (+ round/soft arch, - flat/stern bar)
 //   mouthOpen  0..1   jaw gap (0 closed line, 1 open)
 //   mouthCurve-1..1   mouth shape (+1 smile, -1 frown)
+//   earPerk   -1..1   ear erectness: -1 drooped/folded down .. +1 pricked tall
+//   earPitch  -1..1   ear swivel: +1 forward (attention) .. -1 pinned flat back
+//   earFlare   0..1   ear splay: 0 tight/vertical .. 1 airplane-horizontal
+//   frillFlare 0..1   neck/crest frill display: 0 laid flat .. 1 fully flared
+// earPerk/earPitch/earFlare/frillFlare are EXPRESSIVE (emotion) deltas that ride
+// on top of the age-lerped NEUTRAL ear pose the generator supplies via opts.ears.
 const DEFAULTS = {
   eyeOpen: 1, pupilX: 0, pupilY: 0,
   browHeight: 0.3, browAngle: 0, browCurve: 0.2,
   mouthOpen: 0.06, mouthCurve: 0.1,
+  earPerk: 0.2, earPitch: 0.1, earFlare: 0.1, frillFlare: 0.25,
 };
 
 // ---------------------------------------------------------------------------
@@ -47,13 +54,17 @@ const DEFAULTS = {
 // strengthens the read, per the face research).
 // ---------------------------------------------------------------------------
 export const EMOTIONS = {
-  neutral:   { eyeOpen: 1.0,  pupilX: 0.0,  pupilY: 0.0,   browHeight: 0.3,  browAngle: 0.0,  browCurve: 0.2,  mouthOpen: 0.06, mouthCurve: 0.1 },
-  happy:     { eyeOpen: 0.85, pupilX: 0.0,  pupilY: 0.15,  browHeight: 0.55, browAngle: -0.1, browCurve: 0.7,  mouthOpen: 0.18, mouthCurve: 0.85 },
-  content:   { eyeOpen: 0.55, pupilX: 0.0,  pupilY: 0.0,   browHeight: 0.15, browAngle: 0.0,  browCurve: 0.8,  mouthOpen: 0.05, mouthCurve: 0.45 },
-  curious:   { eyeOpen: 1.0,  pupilX: 0.35, pupilY: 0.25,  browHeight: 0.6,  browAngle: -0.25,browCurve: 0.55, mouthOpen: 0.2,  mouthCurve: 0.25 },
-  surprised: { eyeOpen: 1.0,  pupilX: 0.0,  pupilY: 0.0,   browHeight: 0.9,  browAngle: 0.0,  browCurve: 0.7,  mouthOpen: 0.75, mouthCurve: 0.0 },
-  angry:     { eyeOpen: 0.7,  pupilX: 0.0,  pupilY: -0.1,  browHeight: -0.2, browAngle: 0.75, browCurve: -0.5, mouthOpen: 0.28, mouthCurve: -0.6 },
-  sleepy:    { eyeOpen: 0.28, pupilX: 0.0,  pupilY: -0.35, browHeight: -0.1, browAngle: 0.05, browCurve: 0.1,  mouthOpen: 0.05, mouthCurve: -0.1 },
+  neutral:   { eyeOpen: 1.0,  pupilX: 0.0,  pupilY: 0.0,   browHeight: 0.3,  browAngle: 0.0,  browCurve: 0.2,  mouthOpen: 0.06, mouthCurve: 0.1,  earPerk: 0.2,  earPitch: 0.1,  earFlare: 0.1,  frillFlare: 0.25 },
+  happy:     { eyeOpen: 0.85, pupilX: 0.0,  pupilY: 0.15,  browHeight: 0.55, browAngle: -0.1, browCurve: 0.7,  mouthOpen: 0.18, mouthCurve: 0.85, earPerk: 0.6,  earPitch: 0.5,  earFlare: 0.15, frillFlare: 0.35 },
+  content:   { eyeOpen: 0.55, pupilX: 0.0,  pupilY: 0.0,   browHeight: 0.15, browAngle: 0.0,  browCurve: 0.8,  mouthOpen: 0.05, mouthCurve: 0.45, earPerk: 0.1,  earPitch: 0.15, earFlare: 0.35, frillFlare: 0.05 },
+  curious:   { eyeOpen: 1.0,  pupilX: 0.35, pupilY: 0.25,  browHeight: 0.6,  browAngle: -0.25,browCurve: 0.55, mouthOpen: 0.2,  mouthCurve: 0.25, earPerk: 1.0,  earPitch: 0.8,  earFlare: 0.0,  frillFlare: 0.4  },
+  surprised: { eyeOpen: 1.0,  pupilX: 0.0,  pupilY: 0.0,   browHeight: 0.9,  browAngle: 0.0,  browCurve: 0.7,  mouthOpen: 0.75, mouthCurve: 0.0,  earPerk: 1.0,  earPitch: 0.45, earFlare: 0.0,  frillFlare: 0.85 },
+  angry:     { eyeOpen: 0.7,  pupilX: 0.0,  pupilY: -0.1,  browHeight: -0.2, browAngle: 0.75, browCurve: -0.5, mouthOpen: 0.28, mouthCurve: -0.6, earPerk: -0.25,earPitch: -0.9, earFlare: 0.3,  frillFlare: 1.0  },
+  sleepy:    { eyeOpen: 0.28, pupilX: 0.0,  pupilY: -0.35, browHeight: -0.1, browAngle: 0.05, browCurve: 0.1,  mouthOpen: 0.05, mouthCurve: -0.1, earPerk: -0.7, earPitch: -0.2, earFlare: 0.5,  frillFlare: 0.05 },
+  // afraid: ears flat back + splayed, wide worried eyes, inner-up brows.
+  afraid:    { eyeOpen: 1.0,  pupilX: 0.0,  pupilY: 0.1,   browHeight: 0.7,  browAngle: -0.55,browCurve: 0.5,  mouthOpen: 0.4,  mouthCurve: -0.25,earPerk: 0.3,  earPitch: -1.0, earFlare: 0.6,  frillFlare: 0.8  },
+  // sad: ears fully drooped (Judy Hopps), inner-up brows, downturned mouth.
+  sad:       { eyeOpen: 0.6,  pupilX: 0.0,  pupilY: -0.3,  browHeight: -0.1, browAngle: -0.8, browCurve: 0.35, mouthOpen: 0.05, mouthCurve: -0.55,earPerk: -0.8, earPitch: -0.3, earFlare: 0.2,  frillFlare: 0.1  },
 };
 
 export function emotionParams(name) {
@@ -72,6 +83,14 @@ export function emotionParams(name) {
 //   mouth      : {center, forward, up, width}  — mouth placement (relative to head
 //                origin), supplied by the generator from the skull/snout/jaw bones.
 //                All in head-local space. Omit to skip the mouth (eye-only rigs).
+//   ears       : {anchors:[{pos,out,up}], size, length, width, droop, pointed,
+//                pairs, neutral:{perk,pitch,flare}, proud} — expressive ear rig
+//                (head-local anchors from the generator's skull bone). Omit / size 0
+//                to skip ears entirely (genome-optional).
+//   frill      : {size, extent, soft, R} — neck/crest frill petals on the skull rear;
+//                posed by frillFlare. Omit / size 0 to skip.
+//   brow       : {weight, sag} — structural brow thickness / outer-end sag modifiers
+//                (default {1,0} reproduces the original brow exactly).
 export function createFaceRig(params = {}, opts = {}) {
   const p = { ...DEFAULTS, ...params };
   const R = opts.headRadius ?? 1;
@@ -79,11 +98,14 @@ export function createFaceRig(params = {}, opts = {}) {
   const eyeHeight = opts.eyeHeight ?? 0.45;
   const eyeForward = opts.eyeForward ?? 0.72;
   const spread = (opts.eyeSpread ?? 0.55) * R;
+  const brow = opts.brow || {};
+  const browWeight = brow.weight ?? 1;
+  const browSag = brow.sag ?? 0;
 
   const rig = new THREE.Group();
   rig.name = 'faceRig';
   // Store the layout so applyFaceParams can recompute poses at the same scale.
-  rig.userData.layout = { R, eyeR, eyeHeight, eyeForward, spread };
+  rig.userData.layout = { R, eyeR, eyeHeight, eyeForward, spread, browWeight, browSag };
 
   // Vertical position of the eyes on the skull (y), and forward (z) on the sphere.
   const eyeY = lerp(-R * 0.15, R * 0.5, eyeHeight);
@@ -97,7 +119,7 @@ export function createFaceRig(params = {}, opts = {}) {
     eye.rotation.y = side * 0.25;
     rig.add(eye);
 
-    const brow = makeBrow(eyeR, side);
+    const brow = makeBrow(eyeR, side, browWeight, browSag);
     rig.add(brow);
   }
 
@@ -113,8 +135,148 @@ export function createFaceRig(params = {}, opts = {}) {
     };
   }
 
+  // Ears — expressive 2-segment (base + tip) rotation chain per ear, mirrored L/R,
+  // layered on top like the eyes/mouth so smooth/voxel skin never swallows them.
+  // Built ONCE; all posing is rotation-only (no geometry rebuild on emotion change).
+  if (opts.ears && (opts.ears.size ?? 0) > 0.01) {
+    rig.userData.ears = buildEars(rig, opts.ears);
+  }
+
+  // Frill / crest — a row of petals on the skull rear, posed by frillFlare.
+  if (opts.frill && (opts.frill.size ?? 0) > 0.01) {
+    rig.userData.frill = buildFrill(rig, opts.frill);
+  }
+
   applyFaceParams(rig, p);
   return rig;
+}
+
+// ---------------------------------------------------------------------------
+// Ears — the highest-leverage cuteness feature. Each ear is a cheap 2-segment
+// rotation chain (base pivot + tip pivot) reusing taperedTube, driven entirely by
+// rotations so emotion changes need NO geometry rebuild (and it ports 1:1 to
+// Bedrock bones). `earPairs` 2–3 adds Toothless-style trailing plates that follow
+// the main pair at reduced amplitude (automatic overlapping action).
+// ---------------------------------------------------------------------------
+function buildEars(rig, e) {
+  const size = e.size;                          // world length unit (earSize * R)
+  const length = e.length ?? 1;
+  const width = e.width ?? 1;
+  const pointed = clamp(e.pointed ?? 0.6, 0, 1);
+  const pairs = Math.max(1, Math.min(3, Math.round(e.pairs ?? 1)));
+  const proud = e.proud ? 1.04 : 1.0;
+
+  const earLen = size * length * 1.55;
+  const baseLen = earLen * 0.55;
+  const tipLen = earLen * 0.45;
+  const baseW = size * width * 0.34;
+  const midW = baseW * 0.92;
+  const tipW = baseW * 0.5;
+
+  // shared geometry (built once); tinted plates. Inner-ear a pinker inset.
+  const outerMat = new THREE.MeshStandardMaterial({ color: 0x4a3b38, roughness: 0.6, metalness: 0 });
+  const innerMat = new THREE.MeshStandardMaterial({ color: 0x9a5f63, roughness: 0.7, metalness: 0 });
+  const baseGeo = earSegGeometry(baseLen, baseW, midW, 0.15);            // barely tapers
+  const tipGeo = earSegGeometry(tipLen, midW, tipW, pointed);           // tapers to point
+  const innerGeo = earSegGeometry(baseLen * 0.92, baseW * 0.6, midW * 0.5, 0.3);
+
+  const PAIR_SCALE = [1.0, 0.7, 0.5];
+  const PAIR_AMP = [1.0, 0.5, 0.25];
+  const items = [];
+
+  for (let pi = 0; pi < pairs; pi++) {
+    for (const anchor of e.anchors) {
+      const side = anchor.pos.x < 0 ? -1 : 1;
+      const root = new THREE.Group();
+      root.name = `ear${side < 0 ? 'L' : 'R'}${pi ? '_' + pi : ''}`;
+      // trailing pairs cascade down-and-back along the skull, at reduced scale.
+      const back = pi * size * 0.9;
+      root.position.copy(anchor.pos).multiplyScalar(proud)
+        .add(new THREE.Vector3(0, -pi * size * 0.55, -back));
+      root.scale.setScalar(PAIR_SCALE[pi]);
+
+      const baseMesh = new THREE.Mesh(baseGeo, outerMat);
+      baseMesh.name = 'earBase';
+      baseMesh.scale.z = 0.42;                    // flatten into a leaf/plate
+      root.add(baseMesh);
+
+      if (pi === 0) {                             // inner-ear only on the main pair
+        const inner = new THREE.Mesh(innerGeo, innerMat);
+        inner.name = 'earInner';
+        inner.scale.z = 0.30;
+        inner.position.z = baseW * 0.28;          // proud of the front plate face
+        root.add(inner);
+      }
+
+      const tip = new THREE.Group();
+      tip.name = 'earTip';
+      tip.position.set(0, baseLen, 0);
+      const tipMesh = new THREE.Mesh(tipGeo, outerMat);
+      tipMesh.name = 'earTipMesh';
+      tipMesh.scale.z = 0.42;
+      tip.add(tipMesh);
+      root.add(tip);
+
+      rig.add(root);
+      items.push({ root, tip, side, amp: PAIR_AMP[pi] });
+    }
+  }
+
+  return {
+    items,
+    neutral: e.neutral || { perk: 0.2, pitch: 0.0, flare: 0.1 },
+    droop: clamp(e.droop ?? 0.25, 0, 1),
+  };
+}
+
+// One ear segment: a taperedTube swept up +Y, tip sharpness from `pointed` (0
+// rounded lobe .. 1 sharp point). Flattened downstream (scale.z) into a plate.
+function earSegGeometry(len, rBase, rTip, pointed) {
+  const P0 = new THREE.Vector3(0, 0, 0);
+  const C = new THREE.Vector3(0, len * 0.5, 0);
+  const P1 = new THREE.Vector3(0, len, 0);
+  const path = new THREE.QuadraticBezierCurve3(P0, C, P1);
+  const pExp = lerp(0.7, 2.2, clamp(pointed, 0, 1));   // tip taper exponent
+  const radiusFn = (t) => {
+    const body = lerp(rBase, rTip, t);                 // linear base->tip
+    const point = Math.pow(1 - t, pExp);               // sharpen the very tip
+    return Math.max(1e-3, body * lerp(1, point, t));   // full width at base -> point at tip
+  };
+  return taperedTube(path, 12, 7, radiusFn);
+}
+
+// Neck/crest frill: a fan of petals across the rear-top of the skull. Posed by
+// frillFlare (petals pitch away from the body + scale slightly) — the frilled-
+// lizard display, doubling as a threat/excitement expression. Softness controls
+// rounded-fleshy (axolotl) vs sharp-webbed (spiky) petal tips.
+function buildFrill(rig, f) {
+  const R = f.R ?? 1;
+  const size = f.size;                            // world unit (frillSize * R)
+  const soft = clamp(f.soft ?? 0.7, 0, 1);
+  const extent = clamp(f.extent ?? 0.3, 0, 1);
+  const nPetals = 5 + Math.round(extent * 4);     // 5..9 petals
+  const petalLen = size * lerp(0.9, 1.5, extent);
+  const petalW = size * 0.16;
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x6a4a52, roughness: 0.7, metalness: 0, side: THREE.DoubleSide,
+  });
+  const geo = earSegGeometry(petalLen, petalW, petalW * 0.35, 1 - soft * 0.7);
+
+  const items = [];
+  const grp = new THREE.Group();
+  grp.name = 'frill';
+  for (let i = 0; i < nPetals; i++) {
+    const u = nPetals > 1 ? i / (nPetals - 1) - 0.5 : 0;   // -0.5..0.5 across
+    const petal = new THREE.Mesh(geo, mat);
+    petal.scale.z = 0.4;
+    // seat across the rear crown of the skull, arcing down the sides toward the neck.
+    petal.position.set(u * R * 1.15, R * (0.55 - u * u * 0.6), -R * (0.55 + Math.abs(u) * 0.1));
+    petal.userData.spanU = u;
+    grp.add(petal);
+    items.push({ petal, u });
+  }
+  rig.add(grp);
+  return { items, R };
 }
 
 // A single eye: white eyeball (front-facing dome) + a dark pupil that rides on
@@ -153,30 +315,36 @@ function makeEye(eyeR, side) {
 // amount is driven by browCurve; the whole brow is then positioned close above the
 // eye and tilted by browAngle in applyFaceParams. Geometry is rebuilt only when
 // browCurve changes (cached on userData.curveKey).
-function makeBrow(eyeR, side) {
+function makeBrow(eyeR, side, weight = 1, sag = 0) {
   const mat = new THREE.MeshStandardMaterial({ color: 0x2a2320, roughness: 0.55, metalness: 0 });
-  const brow = new THREE.Mesh(browGeometry(eyeR, 0.2), mat);
+  const brow = new THREE.Mesh(browGeometry(eyeR, 0.2, weight, sag), mat);
   brow.name = side < 0 ? 'browL' : 'browR';
   brow.userData.side = side;
   brow.userData.eyeR = eyeR;
   brow.userData.curveKey = 0.2;
+  brow.userData.weight = weight;
+  brow.userData.sag = sag;
   return brow;
 }
 
 // Build the arched, tapered brow geometry for a given curve value (-1..1).
 // Higher curve = rounder/softer arch; lower = flatter, sterner. Radius tapers
 // from a thin middle to soft points at both ends so it never reads as a rod.
-function browGeometry(eyeR, curve) {
+// `weight` (thickness multiplier, 1 = original) and `sag` (0..1, drops the OUTER
+// end for a heavy bloodhound/grandpa brow) are STRUCTURAL genome modifiers —
+// weight 1 / sag 0 reproduce the original brow exactly.
+function browGeometry(eyeR, curve, weight = 1, sag = 0) {
   const hx = eyeR * 0.85;                         // half length (~ eye width)
   const cN = (clamp(curve, -1, 1) + 1) / 2;       // 0..1
   const arch = eyeR * lerp(0.05, 0.55, cN);       // control-point rise (arch)
+  const outerDrop = eyeR * clamp(sag, 0, 1) * 0.6;// heavy brow: outer end sags down
   const P0 = new THREE.Vector3(-hx, 0, 0);        // inner end (mirrored per side)
   const C  = new THREE.Vector3(0, arch, 0);       // mid control (arch peak)
-  const P1 = new THREE.Vector3(hx, 0, 0);         // outer end
+  const P1 = new THREE.Vector3(hx, -outerDrop, 0);// outer end (sags with `sag`)
   const path = new THREE.QuadraticBezierCurve3(P0, C, P1);
-  const rMax = eyeR * 0.17;                        // mid thickness (thin, soft)
+  const rMax = eyeR * 0.17 * Math.max(0.2, weight);// mid thickness (thin, soft)
   // inner end a touch fatter than the outer for a natural brow taper
-  const radiusFn = (t) => rMax * Math.pow(Math.sin(Math.PI * t), 0.55) * lerp(1.1, 0.85, t) + eyeR * 0.012;
+  const radiusFn = (t) => rMax * Math.pow(Math.sin(Math.PI * t), 0.55) * lerp(1.1, 0.85, t) + eyeR * 0.012 * weight;
   return taperedTube(path, 22, 7, radiusFn);
 }
 
@@ -326,7 +494,7 @@ export function applyFaceParams(rig, params = {}) {
     // per-frame churn); dispose the old geometry so we don't leak buffers.
     if (brow.userData.curveKey !== curve) {
       brow.geometry.dispose();
-      brow.geometry = browGeometry(eyeR, curve);
+      brow.geometry = browGeometry(eyeR, curve, brow.userData.weight ?? 1, brow.userData.sag ?? 0);
       brow.userData.curveKey = curve;
     }
     // height above the eye center — small so it hugs the eye (close, not antenna).
@@ -354,6 +522,44 @@ export function applyFaceParams(rig, params = {}) {
       band.geometry.dispose();
       band.geometry = mouthBandGeometry(mouthInfo.width, open, mcurve);
       band.userData.key = key;
+    }
+  }
+
+  // --- ears: pose each ear (base pivot + tip pivot) from the 3 expressive params
+  // composed onto the age-lerped neutral pose. Rotation-only — no geometry rebuild.
+  const ears = rig.userData.ears;
+  if (ears) {
+    const nP = ears.neutral, droop = ears.droop;
+    for (const it of ears.items) {
+      // deltas ride on the neutral pose, scaled per trailing-pair amplitude.
+      const perk  = clamp(nP.perk  + clamp(p.earPerk,  -1, 1) * it.amp, -1, 1.2);
+      const pitch = clamp(nP.pitch + clamp(p.earPitch, -1, 1) * it.amp, -1.2, 1.2);
+      const flare = clamp(nP.flare + clamp(p.earFlare,  0, 1) * it.amp, 0, 1.4);
+      // droop compresses reachable erectness: a floppy ear can lift but never fully pricks.
+      const perkEff = ((perk + 1) / 2) * (1 - 0.5 * droop);
+
+      const REST_FLARE = 0.42, REST_BACK = 0.1;
+      // base pivot (head axes): X = fore/aft lean, Y = slight toe on swivel, Z = splay.
+      const rotX = pitch * 0.95 - (perkEff - 0.45) * 0.4 - REST_BACK;
+      const rotY = it.side * pitch * 0.12;
+      const rotZ = -it.side * (REST_FLARE + flare * 0.9);
+      it.root.rotation.set(rotX, rotY, rotZ, 'ZYX');
+      // tip pivot: straight when pricked, folds forward/down when drooped or floppy.
+      const fold = lerp(1.75, 0.06, perkEff) + droop * 0.9;
+      it.tip.rotation.set(fold, 0, 0);
+    }
+  }
+
+  // --- frill: petals pitch away from the body + scale up slightly with flare ---
+  const frill = rig.userData.frill;
+  if (frill) {
+    const flare = clamp(p.frillFlare, 0, 1);
+    for (const it of frill.items) {
+      // laid-back (flat against neck) at flare 0 -> erect/fanned at flare 1.
+      const pitch = lerp(1.5, 0.15, flare);          // rotation back from vertical
+      const splay = it.u * lerp(0.15, 0.7, flare);   // fan the outer petals wider
+      it.petal.rotation.set(pitch, 0, -it.u * 0.3 - splay);
+      it.petal.scale.y = lerp(0.82, 1.12, flare);
     }
   }
 }
