@@ -147,6 +147,14 @@
             </select>
             <span></span>
           </div>
+          <div class="row">
+            <label title="Rendering fidelity: High = ACES tone-map + IBL + PBR/transmission materials (Explorer showcase); Cheap = flat materials, no environment (Minecraft/perf path)">Render tier</label>
+            <select id="renderTier">
+              <option value="high">High (showcase)</option>
+              <option value="cheap">Cheap (MC/perf)</option>
+            </select>
+            <span></span>
+          </div>
           <div class="row" id="voxelResRow">
             <label title="Voxel grid resolution (only used in Voxel mode)">Voxel res</label>
             <input id="voxelRes" type="range" min="12" max="40" step="1" value="24" />

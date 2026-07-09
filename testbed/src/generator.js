@@ -42,6 +42,7 @@ import {
   markingColorForPoint, cellPositions, buildGridOverlay,
 } from './featureGrid.js';
 import { buildFeatureState, buildFeatureMeshes } from './features.js';
+import * as MAT from './materials.js';
 
 // ---------------------------------------------------------------------------
 // GENOME_SCHEMA
@@ -401,9 +402,15 @@ export function phenotype(genome, age = 0, env = {}) {
 
   const neo = g.headNeoteny;
 
+  // Render tier ('high' | 'cheap') threaded to the material factory. env wins,
+  // then the window global (headless tools poke it like window.__skinMode).
+  const renderTier = env.renderTier
+    ?? (typeof window !== 'undefined' ? window.__renderTier : undefined) ?? 'high';
+
   return {
     ageEased: s,
     globalScale: sizeBoost,
+    renderTier,
 
     // --- head: big & round on babies, proportionate & long-snouted on adults ---
     headScale:   g.headSize * lerp(1.0 + 0.85 * neo, 1.0, s),
@@ -803,27 +810,12 @@ function buildSkeleton(p) {
 // ---------------------------------------------------------------------------
 // Materials
 // ---------------------------------------------------------------------------
-function bodyMaterial(p) {
-  const c = new THREE.Color().setHSL(p.hue, p.sat, p.light);
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0.05 });
-}
-function bellyMaterial(p) {
-  const c = new THREE.Color().setHSL((p.hue + 0.05) % 1, p.sat * 0.7, Math.min(0.9, p.light + 0.22));
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.75, metalness: 0.0 });
-}
-function hardMaterial(p) {
-  const c = new THREE.Color().setHSL((p.hue + 0.08) % 1, p.sat * 0.4, Math.max(0.14, p.light - 0.30));
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.2 });
-}
-// Wing-membrane material: a thin, double-sided, slightly translucent sheet tinted
-// from the body hue (a touch darker/warmer, like real bat/dragon wing skin).
-function membraneMaterial(p) {
-  const c = new THREE.Color().setHSL((p.hue + 0.02) % 1, Math.min(1, p.sat * 0.9), Math.max(0.16, p.light * 0.82));
-  return new THREE.MeshStandardMaterial({
-    color: c, roughness: 0.7, metalness: 0.0, side: THREE.DoubleSide,
-    transparent: true, opacity: 0.9, emissive: c.clone().multiplyScalar(0.06),
-  });
-}
+// Material factories now live in materials.js (tier-aware PBR). Thin wrappers keep
+// the local call sites unchanged; each reads the phenotype's resolved renderTier.
+const bodyMaterial = (p) => MAT.bodyMaterial(p, p.renderTier);
+const bellyMaterial = (p) => MAT.bellyMaterial(p, p.renderTier);
+const hardMaterial = (p) => MAT.hardMaterial(p, p.renderTier);
+const membraneMaterial = (p) => MAT.membraneMaterial(p, p.renderTier);
 
 // ---------------------------------------------------------------------------
 // Capsule rendering helpers
@@ -890,8 +882,9 @@ function buildMembraneMesh(spec, baseMat) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.computeVertexNormals();
-  const m = baseMat.clone();
-  m.opacity = lerp(0.5, 0.92, amount);
+  // Map fullness onto per-panel translucency: high tier ramps `transmission`
+  // (baby fringe glows more), cheap tier keeps the old opacity ramp.
+  const m = MAT.tuneMembranePanel(baseMat.clone(), amount, 'membrane');
   const mesh = new THREE.Mesh(geo, m);
   mesh.name = 'membrane';
   return mesh;
@@ -913,7 +906,7 @@ function addTusksAndBarbels(head, p, byName, skull) {
 
   // ---- tusks / fangs -----------------------------------------------------
   if (p.tuskSize > 0.02) {
-    const ivory = new THREE.MeshStandardMaterial({ color: 0xece3cf, roughness: 0.5, metalness: 0.05 });
+    const ivory = MAT.ivoryMaterial(p.renderTier);
     const dir = Math.max(-1, Math.min(1, p.tuskDir));   // + up (from jaw), - down (sabers)
     const len = R * 0.55 * p.tuskSize;
     const baseR = R * 0.06 * (0.7 + 0.5 * p.tuskSize);
@@ -937,8 +930,7 @@ function addTusksAndBarbels(head, p, byName, skull) {
 
   // ---- barbels / whiskers (eastern) --------------------------------------
   if (p.barbelLen > 0.02) {
-    const c = new THREE.Color().setHSL((p.hue + 0.02) % 1, p.sat * 0.6, Math.min(0.72, p.light + 0.05));
-    const barbelMat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0 });
+    const barbelMat = MAT.barbelMaterial(p, p.renderTier);
     const len = R * 0.9 * p.barbelLen;
     const baseR = R * 0.035;
     const pairs = Math.max(1, Math.min(2, Math.round(p.barbelPairs)));
@@ -1178,6 +1170,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     ears: earOpts,
     frill: frillOpts,
     brow: { weight: p.browWeight, sag: p.browSag },
+    tier: p.renderTier,
   });
   face.name = 'faceRig';
   head.add(face);

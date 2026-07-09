@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import {
   GENOME_SCHEMA, DEFAULT_GENOME, FACE_TRAITS,
@@ -33,7 +34,21 @@ if (typeof window !== 'undefined') {
   window.__skinMode ??= 'smooth';
   window.__voxelRes ??= 24;
   window.__showRig ??= false;
+  // Render fidelity tier — mirrors window.__skinMode so the headless tools can
+  // flip it. 'high' = ACES + IBL + PBR/transmission materials (Explorer showcase);
+  // 'cheap' = no IBL, flat MeshStandard materials (MC/perf path).
+  window.__renderTier ??= 'high';
 }
+
+// Per-tier rendering config. (Post-processing composer + soft/contact shadows are
+// a follow-up phase; `composer` is reserved for that and currently unused.)
+const TIERS = {
+  high:  { env: true,  envMapIntensity: 0.75, exposure: 1.05, grid: false,
+           key: 1.6, fill: 0.25, rim: 1.4, hemi: 0.15 },
+  cheap: { env: false, envMapIntensity: 0.0,  exposure: 1.0,  grid: true,
+           key: 2.2, fill: 0.7,  rim: 0.9, hemi: 0.6 },
+};
+const tierCfg = () => TIERS[window.__renderTier] ?? TIERS.high;
 
 // ---------------------------------------------------------------------------
 // Scene setup
@@ -43,9 +58,24 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDraw
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Color management + filmic tone mapping — the single biggest quality jump. sRGB
+// output is the r160 default; set it explicitly so the pin can't drift. ACES maps
+// the HDR IBL/lights into a believable display range (exposure set per tier).
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b2330);
+
+// IBL: PMREM a procedural RoomEnvironment (r160 constructor takes the renderer so
+// it uses physically-correct light intensity) → studio-quality ambient + real
+// speculars with ZERO external HDRI assets. Assigned to scene.environment only in
+// high tier (applyTier). r160 has no scene.environmentIntensity — per-material
+// envMapIntensity (set in rebuild()) tunes strength instead.
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTexture = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+pmrem.dispose();
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
 camera.position.set(4.5, 3.0, 6.5);
@@ -55,13 +85,18 @@ controls.enableDamping = true;
 controls.target.set(0, 1.2, 0);
 
 // --- lighting: rough 3-point setup ---------------------------------------
+// Light rig — rebalanced by applyTier(): in high tier the IBL carries ambient/fill
+// so the key drops and the cool rim pops the silhouette; cheap tier keeps the old
+// brighter 3-point + hemisphere since it has no environment map.
 const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
 key.position.set(5, 8, 6);
 key.castShadow = true;
-key.shadow.mapSize.set(1024, 1024);
+key.shadow.mapSize.set(2048, 2048);
 key.shadow.camera.near = 1; key.shadow.camera.far = 30;
 key.shadow.camera.left = -8; key.shadow.camera.right = 8;
 key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.02;
 scene.add(key);
 
 const fill = new THREE.DirectionalLight(0x9fc0ff, 0.7);
@@ -72,7 +107,8 @@ const rim = new THREE.DirectionalLight(0xffffff, 0.9);
 rim.position.set(-2, 5, -8);
 scene.add(rim);
 
-scene.add(new THREE.HemisphereLight(0xbcd6ff, 0x35302a, 0.6));
+const hemi = new THREE.HemisphereLight(0xbcd6ff, 0x35302a, 0.6);
+scene.add(hemi);
 
 // --- ground + grid --------------------------------------------------------
 const ground = new THREE.Mesh(
@@ -86,6 +122,32 @@ scene.add(ground);
 const grid = new THREE.GridHelper(24, 24, 0x55708f, 0x3a4a5c);
 grid.position.y = 0.001;
 scene.add(grid);
+
+// ---------------------------------------------------------------------------
+// Render tier: apply env map, light balance, exposure, grid visibility for the
+// active window.__renderTier. Called at boot and whenever the tier changes; the
+// caller triggers a rebuild() so the material factory re-runs at the new tier.
+// ---------------------------------------------------------------------------
+function applyEnvMapIntensity(obj, intensity) {
+  if (!obj) return;
+  obj.traverse((n) => {
+    if (!n.material) return;
+    const mats = Array.isArray(n.material) ? n.material : [n.material];
+    for (const m of mats) if ('envMapIntensity' in m) m.envMapIntensity = intensity;
+  });
+}
+
+function applyTier() {
+  const cfg = tierCfg();
+  scene.environment = cfg.env ? envTexture : null;
+  renderer.toneMappingExposure = cfg.exposure;
+  key.intensity = cfg.key;
+  fill.intensity = cfg.fill;
+  rim.intensity = cfg.rim;
+  hemi.intensity = cfg.hemi;
+  grid.visible = cfg.grid;
+  applyEnvMapIntensity(currentDragon, cfg.envMapIntensity);
+}
 
 // ---------------------------------------------------------------------------
 // Dragon (re)build
@@ -106,12 +168,16 @@ function rebuild() {
     skinMode: window.__skinMode ?? 'smooth',
     voxelRes: window.__voxelRes ?? 24,
     showRig: window.__showRig ?? false,
+    renderTier: window.__renderTier ?? 'high',
   };
   const next = generateDragon(genome, age, env);
   scene.remove(currentDragon);
   disposeDragon(currentDragon);
   currentDragon = next;
   scene.add(currentDragon);
+  // Apply per-material IBL strength for the active tier (r160 has no
+  // scene.environmentIntensity, so we set envMapIntensity per material here).
+  applyEnvMapIntensity(currentDragon, tierCfg().envMapIntensity);
   // Convert the freshly-built body to a live SkinnedMesh rig (smooth mode only;
   // returns null for voxel/capsule, which stay static). Re-apply the current pose
   // so the age slider scrubs a POSED dragon.
@@ -288,6 +354,7 @@ emotionSel.addEventListener('change', () => {
 // Skin & View controls (skin mode / voxel res / show rig / archetype / geo.json)
 // ---------------------------------------------------------------------------
 const skinModeSel = document.getElementById('skinMode');
+const renderTierSel = document.getElementById('renderTier');
 const voxelResEl = document.getElementById('voxelRes');
 const voxelResVal = document.getElementById('voxelResVal');
 const voxelResRow = document.getElementById('voxelResRow');
@@ -305,6 +372,7 @@ function syncVoxelResEnabled() {
 
 // Initialize the controls from the (possibly headless-preset) globals.
 skinModeSel.value = window.__skinMode;
+renderTierSel.value = window.__renderTier;
 voxelResEl.value = String(window.__voxelRes);
 voxelResVal.textContent = String(window.__voxelRes);
 showRigEl.checked = !!window.__showRig;
@@ -314,6 +382,9 @@ skinModeSel.addEventListener('change', () => {
   window.__skinMode = skinModeSel.value;
   syncVoxelResEnabled();
   rebuild();
+});
+renderTierSel.addEventListener('change', () => {
+  setRenderTier(renderTierSel.value);
 });
 voxelResEl.addEventListener('input', () => {
   window.__voxelRes = parseInt(voxelResEl.value, 10);
@@ -420,6 +491,7 @@ async function runGallery(title, rows) {
     skinMode: window.__skinMode ?? 'smooth',
     voxelRes: window.__voxelRes ?? 24,
     showRig: window.__showRig ?? false,
+    renderTier: window.__renderTier ?? 'high',
   };
 
   let done = 0;
@@ -429,8 +501,9 @@ async function runGallery(title, rows) {
     if (galleryEl.style.display === 'none') break; // closed mid-run
     const d = generateDragon(cell.genome, cell.age, env);
     scene.add(d);
+    applyEnvMapIntensity(d, tierCfg().envMapIntensity);
     frameObject(d);
-    renderer.render(scene, camera);
+    renderFrame();
     img.src = canvas.toDataURL('image/png');
     scene.remove(d);
     disposeDragon(d);
@@ -499,7 +572,7 @@ function exportGLTF() {
 // Screenshot PNG (renders once at full res then downloads the canvas)
 // ---------------------------------------------------------------------------
 function screenshotPNG() {
-  renderer.render(scene, camera);
+  renderFrame();
   canvas.toBlob((blob) => {
     if (blob) downloadBlob(blob, `dragon_age${age.toFixed(2)}.png`);
   }, 'image/png');
@@ -525,21 +598,41 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
+// Single render entry point — the animate loop, the PNG screenshot, and the
+// in-app gallery all route through here so a future EffectComposer post stack
+// plugs in at ONE site (per the spec's renderFrame() refactor). Today both tiers
+// draw straight to the canvas via renderer.render.
+function renderFrame() {
+  renderer.render(scene, camera);
+}
+
 const animClock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
   // Gentle always-on idle: breathing + low-amplitude axial sway + ear idle,
   // composed on top of the current pose. Cheap, sine-based, deterministic.
+  // (Runs BEFORE the render so the posed/idle frame is what gets drawn.)
   if (currentRig) currentRig.updateIdle(animClock.getElapsedTime());
-  renderer.render(scene, camera);
+  renderFrame();
 }
 
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+// Switch render tier: set the global, re-apply env/lights, and rebuild so the
+// material factory re-runs at the new tier. Shared by the UI select + the headless
+// hook. `rebuild()` re-applies per-material envMapIntensity for the new tier.
+function setRenderTier(tier) {
+  if (tier !== 'high' && tier !== 'cheap') return;
+  window.__renderTier = tier;
+  applyTier();
+  rebuild();
+}
+
 buildPanel();
 resize();
+applyTier();
 rebuild();
 animate();
 
@@ -551,6 +644,9 @@ window.__testbed = {
   get rig() { return currentRig; },
   scene, camera, renderer,
   regenerate: rebuild,
+  renderFrame,
+  setRenderTier,
+  get renderTier() { return window.__renderTier; },
   controls,
   // --- Pose API (Phase-0 animation) --------------------------------------
   poses: POSES,
