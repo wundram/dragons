@@ -39,8 +39,13 @@
 ## Phase 2.5 — Tuning & polish (next)
 - [ ] **Cross-validated tuning backlog** (`design/testbed-eval-02.md`): P0 brows→soft arched shapes; P1 add mouth/jaw line; P1 clamp `robustness` beach-balls; facets; hind-leg absorption (`smoothK`); voxel warty underside; square-viewport framing.
 - [ ] **Wire the pose-sheet gallery** — weights now exist; add a pose API + `poses` gallery mode to evaluate the rig under motion.
-- [~] **Face pass** (in progress): soft arched brows (fix the "floating sticks") + parametric mouth (`mouthOpen`/`mouthCurve`, wired to emotions). Teeth/tongue/fangs deferred.
-- [ ] **Limb/wing refactor + wing membranes** — adopt the **strict tetrapod rule** (`design/limb-and-wing-architecture.md`): wings are a FORELIMB expression (share the shoulder girdle), never a separate 5th/6th limb; fix the quadruped-with-wings "trap"; then skin the wing membrane between spars. Then CA-placed spikes/ridges + reaction-diffusion coloration (per user direction).
+- [x] **Face pass**: soft arched brows (fixed the "floating sticks") + parametric mouth (`mouthOpen`/`mouthCurve`, wired to emotions). Teeth/tongue/fangs deferred.
+- [x] **Bat-wing forelimb refactor + membrane** — strict tetrapod (`design/limb-and-wing-architecture.md`); archetypes snake/drake/wyvern/crawlerFlyer/grasper/eastern; proportion-tuned (big wings, chunky grasper, tamer robustness).
+- [x] **Expressive ears + optional face features** — ear rig (structural + `earPerk`/`earPitch`/`earFlare`, wired to emotions incl. new `afraid`/`sad`, age cute→cool); optional tusks/frill/barbels/brow-mods. `research/expressive-ears-and-features.md`.
+- [x] **CA feature system — phase 1** — `testbed/src/featureGrid.js` (stable (u,v) anchor lattice + `window.__showGrid` overlay) + activator–inhibitor CA markings → vertex colors / voxel tint; genome-driven, age-emergent, breeding-safe. `research/ca-feature-placement.md`.
+- [ ] **CA feature system — phase 2** — discrete geometry off the same grid + `peak` channel: spikes/ridges, feathers, scutes, dorsal sail (instanced, layered, voxel-degradable). `// TODO(phase2)` hooks in place.
+- [ ] **Polish**: bigger/more flap-like Toothless ears; crisper markings (denser grid rings); teeth/tongue/fangs on the jaw hook.
+- [ ] **Wire the pose-sheet gallery** — weights exist; add a pose API + `poses` gallery mode; also unlocks the dramatic wing-spread rest pose.
 - [ ] Genome crossover control (breed two genomes → egg/baby) — mutation tree is the first step.
 - [ ] Human-in-the-loop tuning pass with the galleries.
 
