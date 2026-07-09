@@ -279,11 +279,24 @@ export function buildVoxelSkin(bones, opts = {}, material = null) {
   const group = new THREE.Group();
   group.name = 'body';
 
+  // Optional per-cube tint (CA markings): opts.cubeTint(cx,cy,cz) -> THREE.Color.
+  // When provided, each cube's vertices are painted with the tint at its centre so
+  // the merged mesh carries a `color` attribute (material must set vertexColors).
+  const cubeTint = opts.cubeTint;
+
   if (cubes.length > 0) {
     const geos = [];
     for (const c of cubes) {
       const g = new THREE.BoxGeometry(c.size[0], c.size[1], c.size[2]);
-      g.translate(c.origin[0] + c.size[0] / 2, c.origin[1] + c.size[1] / 2, c.origin[2] + c.size[2] / 2);
+      const cx = c.origin[0] + c.size[0] / 2, cy = c.origin[1] + c.size[1] / 2, cz = c.origin[2] + c.size[2] / 2;
+      g.translate(cx, cy, cz);
+      if (cubeTint) {
+        const col = cubeTint(cx, cy, cz);
+        const nv = g.getAttribute('position').count;
+        const carr = new Float32Array(nv * 3);
+        for (let v = 0; v < nv; v++) { carr[v * 3] = col.r; carr[v * 3 + 1] = col.g; carr[v * 3 + 2] = col.b; }
+        g.setAttribute('color', new THREE.Float32BufferAttribute(carr, 3));
+      }
       geos.push(g);
     }
     const merged = mergeGeometries(geos, false);
