@@ -62,8 +62,9 @@ The test bed graduates into the **Dragon Explorer** app. Pursue **top-tier anima
 - [ ] Next: gaits/IK (walk/run, morphology-adaptive) → flapping flight + spring secondary motion → behavior FSM (the 9 behaviors).
 
 ### 3b. High-fidelity rendering upgrade
-- PBR materials, environment/IBL lighting, better shadows, post-processing (AO/bloom/tone-map), membrane/feather/fur shading, nicer ground/environment.
-- Research-first: `research/high-fidelity-rendering.md` → Opus build. Keep a cheap tier for MC.
+- Research: `research/high-fidelity-rendering.md`.
+- [x] **Phase 1+2 DONE** — `testbed/src/materials.js`: ACES tone-map + sRGB color mgmt + `RoomEnvironment` IBL + `MeshPhysicalMaterial` per part (clearcoat body/eyes, `sheen` feathers, keratin spikes) + **hero thin-walled transmission wing membranes/sail** (glow backlit) + light rebalance + soft shadows. `window.__renderTier` high/cheap switch (+ UI), single `renderFrame()` seam. Markings + skinning preserved.
+- [ ] **Phase 3 (deferred, `.agents/resume/render-upgrade.md`)** — EffectComposer post stack (GTAO + UnrealBloom + OutputPass, MSAA/HalfFloat), VSM soft shadows + contact shadow, route `renderFrame()`/gallery through the composer.
 
 ### 3c. Breeding mechanics + Explorer UX
 - Two-parent genome crossover → egg/baby; inheritance view; family tree. (Genome already supports it; mutation-tree gallery is the first step.)
