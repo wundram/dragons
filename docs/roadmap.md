@@ -61,10 +61,12 @@ The test bed graduates into the **Dragon Explorer** app. Pursue **top-tier anima
 - [x] **Phase 0 (foundation) DONE** — `testbed/src/rig.js` (Bone tree from `userData.skeleton`, pelvis re-rooting, body→`SkinnedMesh` bound to existing skin weights; layered wings/ears/spikes/face follow bones) + `testbed/src/poses.js` (pose API + POSES: idle/stand/rear-up/wings-open/roar/curl-sleep/walk-contact) + `gallery.mjs poses` sheet + gentle breathing/tail-sway idle. Verified across wyvern/drake/snake. Voxel degrades gracefully (unposed).
 - [ ] Next: gaits/IK (walk/run, morphology-adaptive) → flapping flight + spring secondary motion → behavior FSM (the 9 behaviors).
 
-### 3b. High-fidelity rendering upgrade
-- Research: `research/high-fidelity-rendering.md`.
-- [x] **Phase 1+2 DONE** — `testbed/src/materials.js`: ACES tone-map + sRGB color mgmt + `RoomEnvironment` IBL + `MeshPhysicalMaterial` per part (clearcoat body/eyes, `sheen` feathers, keratin spikes) + **hero thin-walled transmission wing membranes/sail** (glow backlit) + light rebalance + soft shadows. `window.__renderTier` high/cheap switch (+ UI), single `renderFrame()` seam. Markings + skinning preserved.
-- [ ] **Phase 3 (deferred, `.agents/resume/render-upgrade.md`)** — EffectComposer post stack (GTAO + UnrealBloom + OutputPass, MSAA/HalfFloat), VSM soft shadows + contact shadow, route `renderFrame()`/gallery through the composer.
+### 3b. High-fidelity rendering upgrade + integration (COMPLETE)
+Research: `research/high-fidelity-rendering.md`; integration review + fixes: `design/rendering-integration-review.md`.
+- [x] **Materials/IBL** — `materials.js`: ACES + sRGB + `RoomEnvironment` IBL + `MeshPhysicalMaterial` per part + transmission wing membranes/sail; `window.__renderTier` high/cheap + single `renderFrame()` seam.
+- [x] **Skinned ears** — 3-bone chain on `skull`, continuous skinned ear sheet (graded curl, not rigid hinge), fixed age scaling (baby 1.7×→0.57× head), inner-ear vertex-color region. Cheap/voxel keeps rigid plates.
+- [x] **Post-fx + presentation** — EffectComposer (RenderPass→GTAO→UnrealBloom→OutputPass, MSAA/HalfFloat), VSM + contact shadow, frame-on-boot/hero camera, placard reposition, gradient backdrop. HIGH tier only.
+- [x] **Feature coherence + seams** — CA markings flow onto spikes/scutes/feathers, phenotype-driven feature/face colors, mouth reseated as skin crease, spike-root + sail-base seam fairing, body facets reduced (`fieldRes` 64→80, ~22–38ms).
 
 ### 3c. Breeding mechanics + Explorer UX
 - Two-parent genome crossover → egg/baby; inheritance view; family tree. (Genome already supports it; mutation-tree gallery is the first step.)
