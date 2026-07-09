@@ -37,6 +37,10 @@ import { createFaceRig, applyFaceParams } from './face.js';
 import { buildFieldMesh } from './field.js';
 import { buildVoxelSkin } from './voxel.js';
 import { exportGeoJSON } from './geojson.js';
+import {
+  buildFeatureGrid, runMarkingCA, applyMarkingColors,
+  markingColorForPoint, cellPositions, buildGridOverlay,
+} from './featureGrid.js';
 
 // ---------------------------------------------------------------------------
 // GENOME_SCHEMA
@@ -120,6 +124,23 @@ export const GENOME_SCHEMA = [
     description: 'Adult saturation. Babies read more pastel; color saturates with age.' },
   { name: 'colorLightness',  min: 0.2, max: 0.85, default: 0.55, group: 'Color',
     description: 'Base body lightness.' },
+
+  // --- Markings / pattern (the CA feature-grid coloration; PHASE 1) ----------
+  // These drive featureGrid.js's activator–inhibitor CA -> per-vertex body colours
+  // (smooth) and per-cube tint (voxel). Age is the CA clock: patterns emerge &
+  // strengthen with age (cute -> cool). Deterministic from patternSeed.
+  { name: 'markingContrast', min: 0.0, max: 1.0, default: 0.45, group: 'Markings',
+    description: 'Marking amplitude: 0 = plain body, 1 = bold high-contrast pattern. Ramps up with age.' },
+  { name: 'markingScale',    min: 0.0, max: 1.0, default: 0.5, group: 'Markings',
+    description: 'Pattern wavelength: low = big blotches/patches, high = fine speckle.' },
+  { name: 'markingType',     min: 0.0, max: 1.0, default: 0.35, group: 'Markings',
+    description: 'Pattern anisotropy: 0 = spots/dapples, 1 = stripes/bands.' },
+  { name: 'markingHue',      min: 0.0, max: 1.0, default: 0.08, group: 'Markings',
+    description: 'Secondary marking hue offset from the body hue (0..1 around the wheel).' },
+  { name: 'patternSeed',     min: 0, max: 65535, default: 1234, step: 1, group: 'Markings',
+    description: 'Per-dragon PRNG seed for the marking CA (uniqueness). Breeds by inheriting/hashing parents.' },
+  { name: 'featurePlasticity', min: 0.4, max: 2.2, default: 1.0, group: 'Markings',
+    description: 'How fast the feature CA advances with age (pattern analogue of maturationRate).' },
 
   // --- Face expression (drives the eye+brow rig directly) -------------------
   { name: 'eyeOpen',   min: 0.0, max: 1.0, default: 1.0, group: 'Face',
@@ -344,6 +365,18 @@ export function phenotype(genome, age = 0, env = {}) {
     hue:   (g.colorHue + hueShift + 1) % 1,
     sat:   g.colorSaturation * lerp(0.55, 1.0, s),
     light: lerp(g.colorLightness + 0.12, g.colorLightness, s),
+
+    // --- markings / pattern (CA coloration) ---
+    // markingContrast ramps 0.3x -> 1x with age so soft baby skin gains bold
+    // adult markings ("markings emerge"). The other params + patternSeed pass
+    // straight through (they are the adult destination; age drives emergence via
+    // the CA generation count in runMarkingCA).
+    markingContrast:   g.markingContrast * lerp(0.30, 1.0, s),
+    markingScale:      g.markingScale,
+    markingType:       g.markingType,
+    markingHue:        g.markingHue,
+    patternSeed:       g.patternSeed,
+    featurePlasticity: g.featurePlasticity,
 
     // --- face params (gentle age drift: wide-innocent -> confident) ---
     face: {
@@ -751,6 +784,19 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const dragon = new THREE.Group();
   dragon.name = 'dragon';
 
+  // ---- CA FEATURE GRID + MARKINGS (phase 1) --------------------------------
+  // Body-anchored (u,v) lattice derived deterministically from the skeleton, plus
+  // the activator–inhibitor colour CA. `markingState.color` is the smooth marking
+  // mask per cell; it is applied as per-vertex colours (smooth) or per-cube tint
+  // (voxel) below. `markingState.peak` is reserved for phase-2 discrete features.
+  // Age drives the CA generation count so patterns emerge/strengthen with age.
+  const featureGrid = buildFeatureGrid(bones);
+  const markingState = runMarkingCA(featureGrid, p, age, env);
+  dragon.userData.featureGrid = featureGrid;      // for debug overlay / geo.json export
+  // TODO(phase2): buildSpikeMeshes(featureGrid, markingState, p) / feathers /
+  // scutes read this SAME grid + markingState.peak (thresholded activator) to
+  // instance discrete geometry oriented to cell.normal/cell.tangent. Not built yet.
+
   // Skin mode: 'smooth' = implicit-field + marching-cubes single mesh (default);
   // 'voxel'  = greedy-voxelized cuboids from the SAME field (Minecraft-native,
   //            Step 3); 'capsule' = the Step-1 raw per-bone capsules (fallback).
@@ -780,7 +826,14 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
       fieldRes,
       ...(smoothK !== undefined ? { smoothK } : {}),
     });
-    const bodyMesh = new THREE.Mesh(geometry, mat);
+    // Marking coloration: write per-vertex colours from the CA, and give the body
+    // mesh its OWN material with vertexColors on + white base so the vertex colour
+    // is the final albedo (other groups keep the plain `mat`, unaffected).
+    applyMarkingColors(geometry, featureGrid, markingState, p);
+    const bodyMat = mat.clone();
+    bodyMat.vertexColors = true;
+    bodyMat.color.setRGB(1, 1, 1);
+    const bodyMesh = new THREE.Mesh(geometry, bodyMat);
     bodyMesh.name = 'body';
     bodyMesh.castShadow = true;
     bodyMesh.receiveShadow = true;
@@ -800,10 +853,20 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
       ?? (typeof window !== 'undefined' ? window.__voxelHeadRes : undefined) ?? 1;
     const smoothK = env.smoothK
       ?? (typeof window !== 'undefined' ? window.__fieldSmoothK : undefined);
+    // Per-cube marking tint: colour each cube by the CA mask at its centre. Give
+    // the voxel body its own vertex-colour material (white base) so the tint is
+    // the final albedo without disturbing the shared `mat`.
+    const voxCellPos = cellPositions(featureGrid);
+    const voxTintCol = new THREE.Color();
+    const cubeTint = (cx, cy, cz) =>
+      markingColorForPoint(cx, cy, cz, featureGrid, markingState, p, voxCellPos, voxTintCol);
+    const voxMat = mat.clone();
+    voxMat.vertexColors = true;
+    voxMat.color.setRGB(1, 1, 1);
     const { group: bodyGroup, stats } = buildVoxelSkin(bones, {
-      voxelRes, headRes,
+      voxelRes, headRes, cubeTint,
       ...(smoothK !== undefined ? { smoothK } : {}),
-    }, mat);
+    }, voxMat);
     dragon.add(bodyGroup);
     dragon.userData.voxelCubes = bodyGroup.userData.voxelCubes;
     dragon.userData.fieldStats = stats;
@@ -931,6 +994,11 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const showRig = env.showRig ?? (typeof window !== 'undefined' && window.__showRig);
   if (showRig) dragon.add(buildRigOverlay(bones, byName));
 
+  // ---- optional feature-grid debug overlay (window.__showGrid, mirrors
+  // window.__showRig) — dots at CA cell centres tinted by region, anchors white --
+  const showGrid = env.showGrid ?? (typeof window !== 'undefined' && window.__showGrid);
+  if (showGrid) dragon.add(buildGridOverlay(featureGrid));
+
   // ---- finalize: lift so feet/hands (or belly) sit near y = 0 -------------
   // Ground-walking forelimbs (low membrane, long arm) reach their fingertips to
   // y=0; pure flyers hold the wing up so the hind feet set the floor. We take the
@@ -953,6 +1021,7 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     genome: { ...genome }, age, env, phenotype: p, skeleton: bones,
     skinMode, fieldStats: dragon.userData.fieldStats,
     voxelCubes: dragon.userData.voxelCubes,
+    featureGrid, markingState,
   };
   return dragon;
 }
