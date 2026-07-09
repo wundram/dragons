@@ -21,6 +21,7 @@
 //   └── mouth (Group)  [ band(Mesh) ] — curved parametric mouth (open/curve)
 
 import * as THREE from 'three';
+import * as MAT from './materials.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -101,6 +102,7 @@ export function createFaceRig(params = {}, opts = {}) {
   const brow = opts.brow || {};
   const browWeight = brow.weight ?? 1;
   const browSag = brow.sag ?? 0;
+  const tier = opts.tier ?? 'high';   // 'high' | 'cheap' — PBR vs flat face materials
 
   const rig = new THREE.Group();
   rig.name = 'faceRig';
@@ -113,13 +115,13 @@ export function createFaceRig(params = {}, opts = {}) {
   const eyeZ = Math.sqrt(Math.max(0.0001, R * R - eyeY * eyeY)) * eyeForward;
 
   for (const side of [-1, 1]) {
-    const eye = makeEye(eyeR, side);
+    const eye = makeEye(eyeR, side, tier);
     eye.position.set(side * spread, eyeY, eyeZ);
     // toe eyes slightly outward so they wrap the head
     eye.rotation.y = side * 0.25;
     rig.add(eye);
 
-    const brow = makeBrow(eyeR, side, browWeight, browSag);
+    const brow = makeBrow(eyeR, side, browWeight, browSag, tier);
     rig.add(brow);
   }
 
@@ -127,7 +129,7 @@ export function createFaceRig(params = {}, opts = {}) {
   // by the smooth/voxel body. Placed & oriented from the generator-supplied
   // skull/snout/jaw frame; sized in head-radius units so it reads at any age.
   if (opts.mouth) {
-    const m = makeMouth(opts.mouth);
+    const m = makeMouth(opts.mouth, tier);
     rig.add(m);
     rig.userData.mouth = {
       width: opts.mouth.width ?? R * 0.9,
@@ -139,12 +141,12 @@ export function createFaceRig(params = {}, opts = {}) {
   // layered on top like the eyes/mouth so smooth/voxel skin never swallows them.
   // Built ONCE; all posing is rotation-only (no geometry rebuild on emotion change).
   if (opts.ears && (opts.ears.size ?? 0) > 0.01) {
-    rig.userData.ears = buildEars(rig, opts.ears);
+    rig.userData.ears = buildEars(rig, opts.ears, tier);
   }
 
   // Frill / crest — a row of petals on the skull rear, posed by frillFlare.
   if (opts.frill && (opts.frill.size ?? 0) > 0.01) {
-    rig.userData.frill = buildFrill(rig, opts.frill);
+    rig.userData.frill = buildFrill(rig, opts.frill, tier);
   }
 
   applyFaceParams(rig, p);
@@ -158,7 +160,7 @@ export function createFaceRig(params = {}, opts = {}) {
 // Bedrock bones). `earPairs` 2–3 adds Toothless-style trailing plates that follow
 // the main pair at reduced amplitude (automatic overlapping action).
 // ---------------------------------------------------------------------------
-function buildEars(rig, e) {
+function buildEars(rig, e, tier = 'high') {
   const size = e.size;                          // world length unit (earSize * R)
   const length = e.length ?? 1;
   const width = e.width ?? 1;
@@ -178,8 +180,8 @@ function buildEars(rig, e) {
   const tipW = baseW * 0.48;           // taper toward a soft-ish tip
 
   // shared geometry (built once); tinted plates. Inner-ear a pinker inset.
-  const outerMat = new THREE.MeshStandardMaterial({ color: 0x4a3b38, roughness: 0.6, metalness: 0 });
-  const innerMat = new THREE.MeshStandardMaterial({ color: 0x9a5f63, roughness: 0.7, metalness: 0 });
+  const outerMat = MAT.earOuterMaterial(tier);
+  const innerMat = MAT.earInnerMaterial(tier);
   const baseGeo = earSegGeometry(baseLen, baseW, midW, 0.08);            // barely tapers (broad)
   const tipGeo = earSegGeometry(tipLen, midW, tipW, pointed);           // tapers to the tip
   const innerGeo = earSegGeometry(baseLen * 0.94, baseW * 0.62, midW * 0.5, 0.25);
@@ -253,7 +255,7 @@ function earSegGeometry(len, rBase, rTip, pointed) {
 // frillFlare (petals pitch away from the body + scale slightly) — the frilled-
 // lizard display, doubling as a threat/excitement expression. Softness controls
 // rounded-fleshy (axolotl) vs sharp-webbed (spiky) petal tips.
-function buildFrill(rig, f) {
+function buildFrill(rig, f, tier = 'high') {
   const R = f.R ?? 1;
   const size = f.size;                            // world unit (frillSize * R)
   const soft = clamp(f.soft ?? 0.7, 0, 1);
@@ -261,9 +263,7 @@ function buildFrill(rig, f) {
   const nPetals = 5 + Math.round(extent * 4);     // 5..9 petals
   const petalLen = size * lerp(0.9, 1.5, extent);
   const petalW = size * 0.16;
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x6a4a52, roughness: 0.7, metalness: 0, side: THREE.DoubleSide,
-  });
+  const mat = MAT.frillMaterial(tier);
   const geo = earSegGeometry(petalLen, petalW, petalW * 0.35, 1 - soft * 0.7);
 
   const items = [];
@@ -285,16 +285,16 @@ function buildFrill(rig, f) {
 
 // A single eye: white eyeball (front-facing dome) + a dark pupil that rides on
 // its surface. Built pointing +z (forward).
-function makeEye(eyeR, side) {
+function makeEye(eyeR, side, tier = 'high') {
   const grp = new THREE.Group();
   grp.name = side < 0 ? 'eyeL' : 'eyeR';
 
-  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0 });
+  const whiteMat = MAT.eyeWhiteMaterial(tier);
   const white = new THREE.Mesh(new THREE.SphereGeometry(eyeR, 16, 14), whiteMat);
   white.name = 'white';
   grp.add(white);
 
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x101014, roughness: 0.2, metalness: 0 });
+  const pupilMat = MAT.pupilMaterial(tier);
   const pupil = new THREE.Mesh(new THREE.SphereGeometry(eyeR * 0.5, 14, 12), pupilMat);
   pupil.name = 'pupil';
   pupil.userData.eyeR = eyeR;
@@ -319,8 +319,8 @@ function makeEye(eyeR, side) {
 // amount is driven by browCurve; the whole brow is then positioned close above the
 // eye and tilted by browAngle in applyFaceParams. Geometry is rebuilt only when
 // browCurve changes (cached on userData.curveKey).
-function makeBrow(eyeR, side, weight = 1, sag = 0) {
-  const mat = new THREE.MeshStandardMaterial({ color: 0x2a2320, roughness: 0.55, metalness: 0 });
+function makeBrow(eyeR, side, weight = 1, sag = 0, tier = 'high') {
+  const mat = MAT.browMaterial(tier);
   const brow = new THREE.Mesh(browGeometry(eyeR, 0.2, weight, sag), mat);
   brow.name = side < 0 ? 'browL' : 'browR';
   brow.userData.side = side;
@@ -357,7 +357,7 @@ function browGeometry(eyeR, curve, weight = 1, sag = 0) {
 // LOWER lip arc that drops by mouthOpen — so one mesh reads both a closed curved
 // line and an open jaw. Built in a local frame (+x across, +y up, +z forward);
 // the generator orients/positions the group from the skull/snout/jaw bones.
-function makeMouth(mouthOpts) {
+function makeMouth(mouthOpts, tier = 'high') {
   const grp = new THREE.Group();
   grp.name = 'mouth';
 
@@ -370,9 +370,7 @@ function makeMouth(mouthOpts) {
   grp.position.copy(mouthOpts.center);
 
   const width = mouthOpts.width ?? 1;
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x2a0d10, roughness: 0.5, metalness: 0, side: THREE.DoubleSide,
-  });
+  const mat = MAT.mouthMaterial(tier);
   const band = new THREE.Mesh(mouthBandGeometry(width, 0.06, 0.1), mat);
   band.name = 'band';
   band.userData.width = width;

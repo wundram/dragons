@@ -35,6 +35,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { mulberry32, hash2 } from './featureGrid.js';
+import * as MAT from './materials.js';
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -189,31 +190,12 @@ export function buildFeatureState(grid, p) {
 // ---------------------------------------------------------------------------
 // Materials (built from the phenotype so features tint with the body).
 // ---------------------------------------------------------------------------
-function spikeMaterial(p) {
-  const c = new THREE.Color().setHSL((p.hue + 0.08) % 1, p.sat * 0.4, Math.max(0.14, p.light - 0.30));
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.22 });
-}
-function sailMaterial(p) {
-  // A touch darker + warmer than the body so the fin reads as a distinct membrane
-  // (like the wing membrane), mostly opaque so the webbing between spikes is clear.
-  const c = new THREE.Color().setHSL((p.hue + 0.02) % 1, Math.min(1, p.sat * 0.95), Math.max(0.14, p.light * 0.68));
-  return new THREE.MeshStandardMaterial({
-    color: c, roughness: 0.68, metalness: 0.02, side: THREE.DoubleSide,
-    transparent: true, opacity: 0.96, emissive: c.clone().multiplyScalar(0.05),
-  });
-}
-function featherMaterial(p) {
-  const c = new THREE.Color().setHSL((p.hue + 0.03) % 1, Math.min(1, p.sat * 0.85), Math.min(0.85, p.light + 0.06));
-  return new THREE.MeshStandardMaterial({
-    color: c, roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide,
-  });
-}
-function scuteMaterial(p) {
-  // Darker + a touch shifted from the body so the plates read as distinct armour
-  // scutes rather than blending into the hide.
-  const c = new THREE.Color().setHSL((p.hue + 0.05) % 1, Math.min(1, p.sat * 0.7), Math.max(0.12, p.light - 0.24));
-  return new THREE.MeshStandardMaterial({ color: c, roughness: 0.55, metalness: 0.12 });
-}
+// Tier-aware PBR factories (materials.js): keratin spikes, transmissive sail,
+// sheen feathers, clearcoat scutes. Cheap tier returns the original flat mats.
+const spikeMaterial = (p) => MAT.spikeMaterial(p, p.renderTier);
+const sailMaterial = (p) => MAT.sailMaterial(p, p.renderTier);
+const featherMaterial = (p) => MAT.featherMaterial(p, p.renderTier);
+const scuteMaterial = (p) => MAT.scuteMaterial(p, p.renderTier);
 
 // ---------------------------------------------------------------------------
 // Small geometry builders.
