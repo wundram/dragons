@@ -159,6 +159,53 @@ export const GENOME_SCHEMA = [
     description: 'Mouth / jaw opening: 0 = closed line, 1 = wide open (surprised).' },
   { name: 'mouthCurve',min: -1.0, max: 1.0, default: 0.1, group: 'Face',
     description: 'Mouth shape: positive = smile, negative = frown.' },
+  // Expressive EAR + FRILL params (deltas on the age-lerped neutral pose; live-update
+  // via FACE_TRAITS so the emotion presets drive them without a full rebuild).
+  { name: 'earPerk',   min: -1.0, max: 1.0, default: 0.2, group: 'Face',
+    description: 'Ear erectness: -1 drooped/folded down, +1 pricked tall & alert.' },
+  { name: 'earPitch',  min: -1.0, max: 1.0, default: 0.1, group: 'Face',
+    description: 'Ear swivel: +1 forward (attention), -1 pinned flat back (fear/anger).' },
+  { name: 'earFlare',  min: 0.0, max: 1.0, default: 0.1, group: 'Face',
+    description: 'Ear splay: 0 tight/vertical, 1 splayed horizontal (airplane ears).' },
+  { name: 'frillFlare',min: 0.0, max: 1.0, default: 0.25, group: 'Face',
+    description: 'Neck/crest frill display: 0 laid flat, 1 fully flared (threat/excitement).' },
+
+  // --- Ears (structural genome; age remaps the NEUTRAL pose & proportions) ----
+  { name: 'earSize',    min: 0.0, max: 1.6, default: 0.9, group: 'Ears',
+    description: 'Overall ear scale vs head radius. 0 = no ears (genome-optional).' },
+  { name: 'earLength',  min: 0.4, max: 2.4, default: 1.0, group: 'Ears',
+    description: 'Ear aspect: 0.4 = stubby nub, 2.4 = long rabbit/fennec ear.' },
+  { name: 'earWidth',   min: 0.5, max: 1.6, default: 1.0, group: 'Ears',
+    description: 'Base width: wide+short = round teddy ear, narrow+long = sleek.' },
+  { name: 'earDroop',   min: 0.0, max: 1.0, default: 0.25, group: 'Ears',
+    description: 'Structural floppiness: bends the tip down & caps how far the ear can prick.' },
+  { name: 'earPointed', min: 0.0, max: 1.0, default: 0.6, group: 'Ears',
+    description: 'Tip sharpness: 0 rounded lobe, 1 sharp point.' },
+  { name: 'earPairs',   min: 1, max: 3, default: 1, step: 1, group: 'Ears',
+    description: 'Extra trailing ear-plate pairs (Toothless-style), at reduced scale/amplitude.' },
+
+  // --- Features (all genome-optional; default ABSENT / neutral so a current
+  //     genome renders essentially unchanged except for the now-present ears) ---
+  { name: 'tuskSize',    min: 0.0, max: 1.5, default: 0.0, group: 'Features',
+    description: 'Tusk/fang size. 0 = none. Small up-tusks = cute underbite; long down-sabers = fierce.' },
+  { name: 'tuskDir',     min: -1.0, max: 1.0, default: 0.5, group: 'Features',
+    description: 'Tusk direction: +1 up from the lower jaw (cute), -1 down from the upper snout (fierce).' },
+  { name: 'tuskCurve',   min: 0.0, max: 1.0, default: 0.5, group: 'Features',
+    description: 'Tusk curl: 0 straight, 1 curled back toward the head.' },
+  { name: 'frillSize',   min: 0.0, max: 1.5, default: 0.0, group: 'Features',
+    description: 'Neck/crest frill size. 0 = none. Soft rounded = axolotl-cute, spiky = cool.' },
+  { name: 'frillExtent', min: 0.0, max: 1.0, default: 0.3, group: 'Features',
+    description: 'Frill spread: small crown crest -> a wide fan reaching down the neck.' },
+  { name: 'frillSoft',   min: 0.0, max: 1.0, default: 0.7, group: 'Features',
+    description: 'Frill petal shape: 1 rounded fleshy (axolotl), 0 sharp webbed spikes.' },
+  { name: 'barbelLength',min: 0.0, max: 1.5, default: 0.0, group: 'Features',
+    description: 'Snout-tip barbel/whisker length (eastern). 0 = none; long = wise flowing tendrils.' },
+  { name: 'barbelPairs', min: 1, max: 2, default: 1, step: 1, group: 'Features',
+    description: 'Barbel pairs: 1 = snout-tip pair, 2 = adds a chin pair.' },
+  { name: 'browWeight',  min: 0.3, max: 1.8, default: 1.0, group: 'Features',
+    description: 'Brow thickness multiplier. Heavy = gentle grandpa/bloodhound; thin = sharp hawk.' },
+  { name: 'browSag',     min: 0.0, max: 1.0, default: 0.0, group: 'Features',
+    description: 'Outer-brow-end downward sag (heavy droopy brow). 0 = the original brow.' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -169,7 +216,9 @@ export const DEFAULT_GENOME = Object.freeze(
 );
 
 // Trait names the face rig consumes (used by app.js grouping/live-update too).
-export const FACE_TRAITS = ['eyeOpen', 'pupilX', 'pupilY', 'browHeight', 'browAngle', 'browCurve', 'mouthOpen', 'mouthCurve'];
+// Includes the expressive ear/frill params so the emotion presets + live sliders
+// update them WITHOUT a full rebuild (they are rotation-only poses).
+export const FACE_TRAITS = ['eyeOpen', 'pupilX', 'pupilY', 'browHeight', 'browAngle', 'browCurve', 'mouthOpen', 'mouthCurve', 'earPerk', 'earPitch', 'earFlare', 'frillFlare'];
 
 // ---------------------------------------------------------------------------
 // ARCHETYPES — full genome objects that are attractor points in the continuous
@@ -378,6 +427,33 @@ export function phenotype(genome, age = 0, env = {}) {
     patternSeed:       g.patternSeed,
     featurePlasticity: g.featurePlasticity,
 
+    // --- EARS (structural, age-scaled): baby = big soft floppy-forward, adult =
+    //     sleeker, sharper, swept-back. The NEUTRAL pose lerps with age; the
+    //     expressive emotion deltas (in face.*) stay identical at every age. ---
+    earSize:    g.earSize * lerp(1.3, 1.0, s),               // bigger vs head on babies
+    earLength:  g.earLength,
+    earWidth:   g.earWidth,
+    earDroop:   clamp01(g.earDroop + lerp(0.20, 0.0, s)),    // floppier young
+    earPointed: g.earPointed * lerp(0.6, 1.0, s),            // rounder young, sharper adult
+    earPairs:   Math.round(g.earPairs),
+    earNeutral: {
+      perk:  lerp(0.35, 0.15, s),                            // big soft-up -> composed
+      pitch: lerp(0.25, -0.15, s),                           // forward-curious -> swept back
+      flare: lerp(0.15, 0.05, s),
+    },
+
+    // --- FEATURES (genome-optional; age-gated like wings/horns) ---
+    tuskSize:   g.tuskSize * smoothstep(clamp01((e - 0.30) / 0.55)),  // grow in past ~30% age
+    tuskDir:    g.tuskDir,
+    tuskCurve:  g.tuskCurve,
+    frillSize:  g.frillSize * lerp(0.45, 1.0, s),            // fringe present early (cute!), grows
+    frillExtent:g.frillExtent,
+    frillSoft:  g.frillSoft,
+    barbelLen:  g.barbelLength * smoothstep(clamp01((e - 0.25) / 0.6)),
+    barbelPairs:Math.round(g.barbelPairs),
+    browWeight: g.browWeight,
+    browSag:    g.browSag,
+
     // --- face params (gentle age drift: wide-innocent -> confident) ---
     face: {
       eyeOpen:    g.eyeOpen * lerp(1.0, 0.9, s),
@@ -389,6 +465,11 @@ export function phenotype(genome, age = 0, env = {}) {
       // mouth: babies read a touch smilier & rounder, softening toward the adult.
       mouthOpen:  g.mouthOpen,
       mouthCurve: g.mouthCurve + lerp(0.12, 0.0, s),
+      // expressive ear/frill deltas (identical at every age; neutral pose ages).
+      earPerk:    g.earPerk,
+      earPitch:   g.earPitch,
+      earFlare:   g.earFlare,
+      frillFlare: g.frillFlare,
     },
   };
 }
@@ -760,6 +841,66 @@ function buildMembraneMesh(spec, baseMat) {
 }
 
 // ---------------------------------------------------------------------------
+// Tusks/fangs + barbels/whiskers — small STATIC layered meshes built into the
+// head group in head-local space (origin = skull world pos), so they render over
+// smooth AND voxel skin. Both are genome-optional (default absent). Expression-
+// free: they ride the head, and visually "move" only when mouthOpen changes.
+// ---------------------------------------------------------------------------
+function addTusksAndBarbels(head, p, byName, skull) {
+  const origin = skull.pos;
+  const R = skull.headR;
+  const fwd = skull.fwd.clone().normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  const lat = new THREE.Vector3().crossVectors(up, fwd).normalize();   // lateral axis
+  const snoutB = byName['snout'], jawB = byName['jaw'];
+
+  // ---- tusks / fangs -----------------------------------------------------
+  if (p.tuskSize > 0.02) {
+    const ivory = new THREE.MeshStandardMaterial({ color: 0xece3cf, roughness: 0.5, metalness: 0.05 });
+    const dir = Math.max(-1, Math.min(1, p.tuskDir));   // + up (from jaw), - down (sabers)
+    const len = R * 0.55 * p.tuskSize;
+    const baseR = R * 0.06 * (0.7 + 0.5 * p.tuskSize);
+    // up-tusks poke over the lip from the lower jaw; down-sabers hang off the snout.
+    const mouthFront = snoutB.tail.clone().lerp(jawB.tail, dir > 0 ? 0.62 : 0.4);
+    for (const side of [-1, 1]) {
+      const base = mouthFront.clone()
+        .add(lat.clone().multiplyScalar(side * (snoutB.rTail * 0.8 + baseR)))
+        .add(up.clone().multiplyScalar(dir * R * 0.02))
+        .sub(origin);
+      const grow = up.clone().multiplyScalar(dir).add(fwd.clone().multiplyScalar(0.35)).normalize();
+      const mid = base.clone().add(grow.clone().multiplyScalar(len * 0.6));
+      // curl the tip back toward the head with tuskCurve.
+      const curl = fwd.clone().multiplyScalar(-p.tuskCurve * 0.5)
+        .add(up.clone().multiplyScalar(dir * 0.5)).normalize();
+      const tip = mid.clone().add(curl.multiplyScalar(len * 0.5));
+      addTaperedCapsule(head, base, mid, baseR, baseR * 0.6, ivory);
+      addTaperedCapsule(head, mid, tip, baseR * 0.6, baseR * 0.12, ivory);
+    }
+  }
+
+  // ---- barbels / whiskers (eastern) --------------------------------------
+  if (p.barbelLen > 0.02) {
+    const c = new THREE.Color().setHSL((p.hue + 0.02) % 1, p.sat * 0.6, Math.min(0.72, p.light + 0.05));
+    const barbelMat = new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0 });
+    const len = R * 0.9 * p.barbelLen;
+    const baseR = R * 0.035;
+    const pairs = Math.max(1, Math.min(2, Math.round(p.barbelPairs)));
+    const anchors = [snoutB.tail.clone()];                       // snout-tip pair
+    if (pairs > 1) anchors.push(jawB.tail.clone().add(up.clone().multiplyScalar(-R * 0.03))); // chin pair
+    for (let pi = 0; pi < pairs; pi++) {
+      const a = anchors[pi];
+      for (const side of [-1, 1]) {
+        const bpos = a.clone().add(lat.clone().multiplyScalar(side * R * 0.18)).sub(origin);
+        const mid = bpos.clone().add(fwd.clone().multiplyScalar(len * 0.5)).add(up.clone().multiplyScalar(-len * 0.15));
+        const tip = mid.clone().add(fwd.clone().multiplyScalar(len * 0.32)).add(up.clone().multiplyScalar(-len * 0.5));
+        addTaperedCapsule(head, bpos, mid, baseR, baseR * 0.6, barbelMat);
+        addTaperedCapsule(head, mid, tip, baseR * 0.6, baseR * 0.15, barbelMat);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // generateDragon(genome, age, env) — public entry point.
 // ---------------------------------------------------------------------------
 // Returns a THREE.Group named 'dragon' with:
@@ -940,20 +1081,51 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     width: Math.max((snoutB.envelopeRadius + snoutB.rTail) * 1.7, R * 1.05),
   };
 
-  // Reusable face rig (unchanged face.js) sized to the skull radius. In smooth
-  // mode we nudge it slightly forward/out so it sits ON the smooth head surface
-  // (the field skull is a plain sphere of radius R).
+  // ---- ear anchors from the skull bone (head-local, skull-centered) --------
+  // Upper-rear-side of the skull sphere, base direction up-out-slightly-back.
+  // Passed to the face rig, which builds/poses the ears (rotation-only). Absent
+  // when earSize resolves to ~0 (genome-optional). fieldBody => sit proud of skin.
+  const earOpts = (p.earSize * R) > 0.02 ? {
+    size: p.earSize * R,
+    length: p.earLength, width: p.earWidth,
+    droop: p.earDroop, pointed: p.earPointed, pairs: p.earPairs,
+    neutral: p.earNeutral,
+    proud: fieldBody,
+    anchors: [-1, 1].map((side) => ({
+      pos: V(side * R * 0.62, R * 0.55, -R * 0.10),
+      out: V(side * 0.75, 0.62, -0.22).normalize(),
+      up: V(0, 1, 0),
+    })),
+  } : null;
+
+  // ---- frill anchor data (skull rear crown; posed by frillFlare) -----------
+  const frillOpts = (p.frillSize * R) > 0.02 ? {
+    size: p.frillSize * R, extent: p.frillExtent, soft: p.frillSoft, R,
+  } : null;
+
+  // Reusable face rig (unchanged eye/brow/mouth contract) sized to the skull
+  // radius. In smooth mode we nudge it slightly forward/out so it sits ON the
+  // smooth head surface (the field skull is a plain sphere of radius R).
   const face = createFaceRig(p.face, {
     headRadius: R,
     eyeSize: p.eyeSize * R * 0.42,
     eyeHeight: p.eyeHeight,
     eyeForward: fieldBody ? Math.min(0.95, p.eyeFwd + 0.06) : p.eyeFwd,
     mouth: mouthOpts,
+    ears: earOpts,
+    frill: frillOpts,
+    brow: { weight: p.browWeight, sag: p.browSag },
   });
   face.name = 'faceRig';
   head.add(face);
   head.userData.faceRig = face;
   head.userData.headRadius = R;
+
+  // ---- tusks + barbels: STATIC layered meshes on the jaw / snout tip -------
+  // (placement-only, no expression state -> built generator-side into the head
+  // group in head-local space, so they layer over smooth AND voxel skin).
+  addTusksAndBarbels(head, p, byName, skull);
+
   dragon.add(head);
 
   // ---- LIMBS (arm/leg volumes: capsule mode only; smooth/voxel live in field) --
