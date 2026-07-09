@@ -166,19 +166,23 @@ function buildEars(rig, e) {
   const pairs = Math.max(1, Math.min(3, Math.round(e.pairs ?? 1)));
   const proud = e.proud ? 1.04 : 1.0;
 
-  const earLen = size * length * 1.55;
-  const baseLen = earLen * 0.55;
-  const tipLen = earLen * 0.45;
-  const baseW = size * width * 0.34;
-  const midW = baseW * 0.92;
-  const tipW = baseW * 0.5;
+  // Broad flap/fin-like ear PLATES (Toothless), not little pointed nubs: the base
+  // is wide and the width is HELD through the mid so the ear reads as a paddle that
+  // is a clear part of the head silhouette. It still tapers toward the tip (pointed)
+  // and is flattened in z (scale.z below) into a thin plate.
+  const earLen = size * length * 1.85;
+  const baseLen = earLen * 0.5;
+  const tipLen = earLen * 0.5;
+  const baseW = size * width * 0.64;   // broad base -> flap/fin, not a horn
+  const midW = baseW * 1.02;           // hold (slightly bulge) the width through the mid
+  const tipW = baseW * 0.48;           // taper toward a soft-ish tip
 
   // shared geometry (built once); tinted plates. Inner-ear a pinker inset.
   const outerMat = new THREE.MeshStandardMaterial({ color: 0x4a3b38, roughness: 0.6, metalness: 0 });
   const innerMat = new THREE.MeshStandardMaterial({ color: 0x9a5f63, roughness: 0.7, metalness: 0 });
-  const baseGeo = earSegGeometry(baseLen, baseW, midW, 0.15);            // barely tapers
-  const tipGeo = earSegGeometry(tipLen, midW, tipW, pointed);           // tapers to point
-  const innerGeo = earSegGeometry(baseLen * 0.92, baseW * 0.6, midW * 0.5, 0.3);
+  const baseGeo = earSegGeometry(baseLen, baseW, midW, 0.08);            // barely tapers (broad)
+  const tipGeo = earSegGeometry(tipLen, midW, tipW, pointed);           // tapers to the tip
+  const innerGeo = earSegGeometry(baseLen * 0.94, baseW * 0.62, midW * 0.5, 0.25);
 
   const PAIR_SCALE = [1.0, 0.7, 0.5];
   const PAIR_AMP = [1.0, 0.5, 0.25];
@@ -197,7 +201,7 @@ function buildEars(rig, e) {
 
       const baseMesh = new THREE.Mesh(baseGeo, outerMat);
       baseMesh.name = 'earBase';
-      baseMesh.scale.z = 0.42;                    // flatten into a leaf/plate
+      baseMesh.scale.z = 0.34;                    // flatten into a thin fin/plate
       root.add(baseMesh);
 
       if (pi === 0) {                             // inner-ear only on the main pair
@@ -213,7 +217,7 @@ function buildEars(rig, e) {
       tip.position.set(0, baseLen, 0);
       const tipMesh = new THREE.Mesh(tipGeo, outerMat);
       tipMesh.name = 'earTipMesh';
-      tipMesh.scale.z = 0.42;
+      tipMesh.scale.z = 0.34;
       tip.add(tipMesh);
       root.add(tip);
 

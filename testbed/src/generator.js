@@ -202,15 +202,15 @@ export const GENOME_SCHEMA = [
     description: 'Neck/crest frill display: 0 laid flat, 1 fully flared (threat/excitement).' },
 
   // --- Ears (structural genome; age remaps the NEUTRAL pose & proportions) ----
-  { name: 'earSize',    min: 0.0, max: 1.6, default: 0.9, group: 'Ears',
-    description: 'Overall ear scale vs head radius. 0 = no ears (genome-optional).' },
-  { name: 'earLength',  min: 0.4, max: 2.4, default: 1.0, group: 'Ears',
+  { name: 'earSize',    min: 0.0, max: 1.6, default: 1.15, group: 'Ears',
+    description: 'Overall ear scale vs head radius. 0 = no ears (genome-optional). Default is a big Toothless-style flap.' },
+  { name: 'earLength',  min: 0.4, max: 2.4, default: 1.05, group: 'Ears',
     description: 'Ear aspect: 0.4 = stubby nub, 2.4 = long rabbit/fennec ear.' },
-  { name: 'earWidth',   min: 0.5, max: 1.6, default: 1.0, group: 'Ears',
-    description: 'Base width: wide+short = round teddy ear, narrow+long = sleek.' },
+  { name: 'earWidth',   min: 0.5, max: 1.6, default: 1.3, group: 'Ears',
+    description: 'Base width: wide = broad paddle/fin flap, narrow+long = sleek.' },
   { name: 'earDroop',   min: 0.0, max: 1.0, default: 0.25, group: 'Ears',
     description: 'Structural floppiness: bends the tip down & caps how far the ear can prick.' },
-  { name: 'earPointed', min: 0.0, max: 1.0, default: 0.6, group: 'Ears',
+  { name: 'earPointed', min: 0.0, max: 1.0, default: 0.4, group: 'Ears',
     description: 'Tip sharpness: 0 rounded lobe, 1 sharp point.' },
   { name: 'earPairs',   min: 1, max: 3, default: 1, step: 1, group: 'Ears',
     description: 'Extra trailing ear-plate pairs (Toothless-style), at reduced scale/amplitude.' },
@@ -480,15 +480,18 @@ export function phenotype(genome, age = 0, env = {}) {
     // --- EARS (structural, age-scaled): baby = big soft floppy-forward, adult =
     //     sleeker, sharper, swept-back. The NEUTRAL pose lerps with age; the
     //     expressive emotion deltas (in face.*) stay identical at every age. ---
-    earSize:    g.earSize * lerp(1.3, 1.0, s),               // bigger vs head on babies
+    // Ears stay a big cute signature at every age: baby = extra-large soft
+    // floppy-forward flap; adult = sleeker but still substantial (never shrinks
+    // into a nub). The flap width/length carry through unchanged.
+    earSize:    g.earSize * lerp(1.35, 1.05, s),             // bigger vs head on babies, still big adult
     earLength:  g.earLength,
     earWidth:   g.earWidth,
-    earDroop:   clamp01(g.earDroop + lerp(0.20, 0.0, s)),    // floppier young
-    earPointed: g.earPointed * lerp(0.6, 1.0, s),            // rounder young, sharper adult
+    earDroop:   clamp01(g.earDroop + lerp(0.22, 0.0, s)),    // floppier young
+    earPointed: g.earPointed * lerp(0.55, 1.0, s),           // rounder young, a touch sharper adult
     earPairs:   Math.round(g.earPairs),
     earNeutral: {
-      perk:  lerp(0.35, 0.15, s),                            // big soft-up -> composed
-      pitch: lerp(0.25, -0.15, s),                           // forward-curious -> swept back
+      perk:  lerp(0.35, 0.18, s),                            // big soft-up -> composed
+      pitch: lerp(0.30, -0.12, s),                           // forward-curious -> gently swept back
       flare: lerp(0.15, 0.05, s),
     },
 
