@@ -38,6 +38,7 @@
 //     part of the volumetric cuboid body.
 
 import { computeVoxelCubes } from './voxel.js';
+import { featureVoxelCubes } from './features.js';
 
 export const PIXELS_PER_UNIT = 16;   // 1 testbed unit = 1 MC block = 16 px
 
@@ -62,14 +63,21 @@ export function buildGeoJSON(bones, opts = {}) {
 
   // Group cubes by their assigned bone name.
   const cubesByBone = new Map();
-  for (const c of cubes) {
+  const addCube = (c) => {
     if (!cubesByBone.has(c.boneName)) cubesByBone.set(c.boneName, []);
     cubesByBone.get(c.boneName).push({
       origin: [r4(c.origin[0] * S), r4((c.origin[1] - yFeet) * S), r4(c.origin[2] * S)],
       size: [r4(c.size[0] * S), r4(c.size[1] * S), r4(c.size[2] * S)],
       uv: [0, 0],
     });
-  }
+  };
+  for (const c of cubes) addCube(c);
+  // PHASE 2: bake the DISCRETE-feature voxel cubes (dorsal spike stacks + crest
+  // sail cuboids) under their tagged bones, lifted by the same yFeet as the body
+  // so the spines sit on the spine bones. Present regardless of the on-screen
+  // skin mode (opts.featureCubes is supplied by exportGeoJSON from the dragon).
+  const featureCubes = opts.featureCubes ?? [];
+  for (const c of featureCubes) addCube(c);
 
   // Emit EVERY skeleton bone (stable tree), attaching cubes where assigned.
   const geoBones = [];
@@ -116,7 +124,9 @@ export function buildGeoJSON(bones, opts = {}) {
     identifier,
     bones: geoBones.length,
     bonesWithCubes: cubesByBone.size,
-    cubes: cubes.length,
+    cubes: cubes.length + featureCubes.length,
+    bodyCubes: cubes.length,
+    featureCubes: featureCubes.length,
     pixelsPerUnit: S,
     boundsBlocks: { min: [r4(miX), r4(miY), r4(miZ)], max: [r4(maX), r4(maY), r4(maZ)] },
     voxelGrid: stats.grid,
@@ -145,7 +155,17 @@ export function exportGeoJSON(dragonOrBones, opts = {}) {
     ?? (typeof window !== 'undefined' ? window.__voxelRes : undefined) ?? 24;
   const headRes = opts.headRes
     ?? (typeof window !== 'undefined' ? window.__voxelHeadRes : undefined) ?? 1;
-  const { json, summary } = buildGeoJSON(bones, { ...opts, voxelRes, headRes });
+  // Phase 2: bake the discrete-feature spike/sail cubes if we were handed a full
+  // dragon Group (userData carries the selected featureState + phenotype). Works
+  // regardless of the current skin mode. Passing a raw bones array skips them.
+  let featureCubes = opts.featureCubes;
+  if (!featureCubes && !Array.isArray(dragonOrBones)) {
+    const ud = dragonOrBones && dragonOrBones.userData;
+    if (ud && ud.featureState && ud.phenotype) {
+      featureCubes = featureVoxelCubes(ud.featureState, ud.phenotype);
+    }
+  }
+  const { json, summary } = buildGeoJSON(bones, { ...opts, voxelRes, headRes, featureCubes });
   const str = JSON.stringify(json, null, 2);
   return opts.summary ? { json: str, summary } : str;
 }
