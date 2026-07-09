@@ -1045,8 +1045,12 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     // ---- SMOOTH BODY: one convolution-field marching-cubes mesh -----------
     // Volumetric bone kinds only (body/skull/arm+leg 'limb'/foot/girdle). Fingers,
     // toes, claws and the wing membrane are thin and render as separate meshes.
+    // Default res bumped 64 -> 80 to reduce the visible low-poly faceting on the
+    // smooth body (snout ridge / haunches). Cost is ~O(res^2) in surface work:
+    // measured ~36ms -> ~55ms regenerate on the reference machine, within the
+    // ~70ms budget. Gallery/thumbnails can override lower via env/window.__fieldRes.
     const fieldRes = env.fieldRes
-      ?? (typeof window !== 'undefined' ? window.__fieldRes : undefined) ?? 64;
+      ?? (typeof window !== 'undefined' ? window.__fieldRes : undefined) ?? 80;
     const smoothK = env.smoothK
       ?? (typeof window !== 'undefined' ? window.__fieldSmoothK : undefined);
     const { geometry, stats } = buildFieldMesh(bones, {
@@ -1164,7 +1168,8 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     center: mouthCenterW.sub(skull.pos),            // head-local
     forward: fwd,
     up: new THREE.Vector3(0, 1, 0),
-    width: Math.max((snoutB.envelopeRadius + snoutB.rTail) * 1.7, R * 1.05),
+    // slightly wider band so the mouth line reads from 3/4 views (was 1.7 / 1.05).
+    width: Math.max((snoutB.envelopeRadius + snoutB.rTail) * 1.9, R * 1.15),
   };
 
   // ---- ear anchors from the skull bone (head-local, skull-centered) --------
@@ -1209,6 +1214,9 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
     frill: frillOpts,
     brow: { weight: p.browWeight, sag: p.browSag },
     tier: p.renderTier,
+    // Phenotype-driven face part colours (ears/brows/mouth/frill) so the head reads
+    // as one creature with the body hue instead of hard-coded browns (item C).
+    faceColors: MAT.faceColors(p),
   });
   face.name = 'faceRig';
   head.add(face);
@@ -1264,7 +1272,11 @@ export function generateDragon(genome = DEFAULT_GENOME, age = 0, env = {}) {
   const noFeatures = env.noFeatures
     ?? (typeof window !== 'undefined' ? window.__noFeatures : undefined) ?? false;
   if (!noFeatures) {
-    const features = buildFeatureMeshes(featureState, p, { mode: skinMode });
+    // Hand the CA grid + marking mask in so features sample the LOCAL body marking
+    // colour at each anchor and carry the pattern across the silhouette (item C).
+    const features = buildFeatureMeshes(featureState, p, {
+      mode: skinMode, grid: featureGrid, marking: markingState,
+    });
     if (features.children.length) dragon.add(features);
   }
 
