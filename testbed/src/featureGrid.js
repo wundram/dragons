@@ -73,9 +73,15 @@ export const REGION_COLORS = {
 // trivial; cell AREA still varies (thin neck/tail -> small cells) because radius
 // and segment length vary, giving the "variable cell size" the spec asks for.
 // Cross-rail / cross-K junctions use nearest-in-3D adjacency so differing K is fine.
-const K_AXIAL = 12;
-const K_SKULL = 10;
-const K_SNOUT = 8;
+// Denser rings => finer cells => crisper, harder-edged spots/stripes (the coarse
+// ~12-sector grid read as soft watercolour). Kept even so the odd-ring brick
+// stagger (π/K) still lands halfway for hex adjacency. The axial rail already has
+// 36 rings along u, so raising K sharpens the circumferential (spot/stripe) detail
+// most. Spike placement (features.js) rejects by PHYSICAL radius, not cell count,
+// so denser cells do not change spike spacing (re-verified).
+const K_AXIAL = 22;
+const K_SKULL = 18;
+const K_SNOUT = 14;
 
 const EPS = 0.012;
 
@@ -343,8 +349,9 @@ export function runMarkingCA(grid, genome, age = 0, env = {}) {
   }
 
   // Map converged concentration to the marking mask + a peak channel. `contrast`
-  // (already age-ramped by phenotype) sharpens the mask around 0.5.
-  const sharp = lerp(1.5, 6.0, clamp01(contrast));
+  // (already age-ramped by phenotype) sharpens the mask around 0.5. Steeper than
+  // before so each cell reads as a near-solid spot/stripe (hard edges, not a wash).
+  const sharp = lerp(2.4, 11.0, clamp01(contrast));
   for (let i = 0; i < n; i++) {
     const v = clamp01(0.5 + (conc[i] - 0.5) * sharp);
     color[i] = v;
@@ -378,8 +385,17 @@ function cellPositions(grid) {
   return arr;
 }
 
+// Edge-hardening for the sampled mask: steepen values around 0.5 so the boundary
+// between marking and base is crisp (hard-edged spots/stripes) instead of a soft
+// gradient. >1 = harder edges; combined with the denser grid this kills the
+// watercolour wash while the small residual slope still anti-aliases the mesh.
+const MASK_EDGE = 3.4;
+function hardenMask(m) { return clamp01(0.5 + (m - 0.5) * MASK_EDGE); }
+
 // Interpolated marking value at an arbitrary point via inverse-distance blend of
-// the K nearest cells (smooth, avoids blocky per-cell banding on the mesh).
+// the K nearest cells, STRONGLY biased to the nearest (1/d^4) so each cell reads
+// as a distinct spot with a crisp boundary rather than a smeared blend, then
+// edge-hardened. The small blend still avoids raw blocky per-cell aliasing.
 function sampleMask(x, y, z, grid, color, cellPos, K = 3) {
   const n = grid.cells.length;
   // find K nearest (tiny K, tiny n -> partial selection is cheap)
@@ -398,10 +414,11 @@ function sampleMask(x, y, z, grid, color, cellPos, K = 3) {
   let wsum = 0, msum = 0;
   for (let k = 0; k < K; k++) {
     if (idx[k] < 0) continue;
-    const w = 1 / (d2[k] + 1e-4);
+    const dd = d2[k] + 1e-4;
+    const w = 1 / (dd * dd);          // 1/d^4 -> hard bias to the nearest cell
     wsum += w; msum += w * color[idx[k]];
   }
-  return wsum > 0 ? msum / wsum : 0;
+  return wsum > 0 ? hardenMask(msum / wsum) : 0;
 }
 
 // ---------------------------------------------------------------------------
