@@ -20,6 +20,7 @@ import {
 import { EMOTIONS, emotionParams } from './face.js';
 import { upgradeToSkinned } from './rig.js';
 import { createLocomotion } from './locomotion.js';
+import { createSprings } from './springs.js';
 import { POSES, POSE_NAMES } from './poses.js';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,9 @@ let age = 0.0;
 let currentDragon = null;
 let currentRig = null;        // AnimRig for the live dragon (null in voxel/capsule)
 let currentLoco = null;       // LocomotionController for the live dragon (null in voxel/capsule)
-let currentGait = 'idle';     // 'idle' | 'walk' | 'run' — persists across rebuilds
+let currentSprings = null;    // secondary spring-bone pass (null in voxel/capsule)
+let springsEnabled = true;    // window.__testbed.setSprings — persists across rebuilds
+let currentGait = 'idle';     // 'idle' | 'walk' | 'run' | 'fly' — persists across rebuilds
 let currentPoseName = 'idle'; // last applied pose; re-applied across rebuilds
 let rebuildTimer = null;
 
@@ -328,6 +331,10 @@ function rebuild() {
   // only; inert otherwise). Restore the persisted gait so it survives rebuilds.
   currentLoco = createLocomotion(currentDragon, currentRig);
   if (currentLoco) currentLoco.setSpeed(currentGait);
+  // Secondary spring-bone pass (tail/ears/wing tips). Fresh state per rebuild is
+  // the safe reset on a geometry discontinuity. Runs LAST in animate().
+  currentSprings = createSprings(currentDragon, currentRig);
+  if (currentSprings) currentSprings.enabled = springsEnabled;
   // Refit the soft contact-shadow blob to the new silhouette (high tier only).
   refreshContactShadow();
   updateReadout();
@@ -840,16 +847,23 @@ function animate() {
   // Locomotion layer: composed AFTER the pose/idle step, BEFORE the render. When
   // the gait is 'idle' this is a no-op, so the frame reads exactly like before.
   if (currentLoco) currentLoco.update(dt);
+  // Secondary spring motion: the LAST bone pass (after locomotion), so tail/ears/
+  // wing tips lag & settle on top of whatever pose/gait/emotion produced.
+  if (currentSprings) currentSprings.update(dt);
   renderFrame();
 }
 
-// Set the ground gait: 'idle' | 'walk' | 'run'. Switching to idle re-applies the
+// Set the gait: 'idle' | 'walk' | 'run' | 'fly'. Switching to idle re-applies the
 // current pose so the leg/spine bones the gait overrode return to their rest
 // (the locomotion controller writes bone quaternions directly during a gait).
+// 'fly' flaps winged plans / cloud-swims serpents / falls back to 'run' if wingless.
 function setGait(name) {
-  if (name !== 'idle' && name !== 'walk' && name !== 'run') return false;
+  if (name !== 'idle' && name !== 'walk' && name !== 'run' && name !== 'fly') return false;
   currentGait = name;
   if (currentLoco) currentLoco.setSpeed(name);
+  // Switching to idle re-applies the pose so gait-driven bones return to rest.
+  // (Not on 'fly': the fly controller keeps driving wings/legs/body every frame
+  // and eases the root height back down itself when you later leave it.)
   if (name === 'idle') applyPoseByName(currentPoseName);
   return true;
 }
@@ -913,7 +927,18 @@ window.__testbed = {
   setGait,
   get gait() { return currentGait; },
   get gaitPlan() { return currentLoco ? currentLoco.plan : 'none'; },
-  // Current root (group) world position — advances as the dragon walks; handy for
-  // verifying forward translation ("does it actually move?").
+  // Whether the live plan can actually fly (winged or serpent). A wingless plan
+  // told to fly falls back to 'run' — this reports false for it.
+  get canFly() { return currentLoco ? currentLoco.canFly : false; },
+  // Airborne blend 0..1 (0 grounded, 1 at cruise altitude) — for verifying lift-off.
+  get airborne() { return currentLoco ? currentLoco.airborne : 0; },
+  // Current root (group) world position — advances as the dragon walks/flies (y
+  // rises aloft); handy for verifying forward translation + take-off height.
   get rootPos() { return currentDragon ? currentDragon.position.clone() : null; },
+  // --- Secondary motion API (Phase-2 animation) --------------------------
+  // Toggle the always-on spring-bone pass (tail/ears/wing tips lag & jiggle).
+  // Default on; persists across rebuilds. For debugging / clean stills.
+  setSprings: (on) => { springsEnabled = (on === undefined) ? !springsEnabled : !!on;
+    if (currentSprings) currentSprings.enabled = springsEnabled; return springsEnabled; },
+  get springs() { return springsEnabled; },
 };

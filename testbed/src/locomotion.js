@@ -22,7 +22,18 @@
 //      roughly in frame (walks a wide circle) — see TURN_RADIUS.
 //
 // speed:  'idle' (no-op — the rig's own idle is unchanged) | 'walk' | 'run'
-//         (run = faster cadence + longer stride + more body motion).
+//         (run = faster cadence + longer stride + more body motion) | 'fly'.
+//
+// FLIGHT ('fly'): dragons with FUNCTIONAL WINGS (a forelimb-wing plan — typically
+// the biped wyvern) flap. The wing bones (_upperArm/_foreArm/_wrist + finger0
+// chain) beat on a sine oscillator with a phase lag down the chain (shoulder
+// leads, membrane/finger tips trail), the body pitches nose-up, hind legs tuck,
+// the tail extends as a rudder, and the ROOT eases up to a cruise altitude and
+// cruises the same wide in-frame circle as walk/run — but through the air.
+// A LEGLESS SERPENT "flies" by cloud-swimming (the lateral undulation, airborne).
+// A wingless plan (e.g. a four-legged drake) can't flap: setSpeed('fly') on it
+// gracefully FALLS BACK to 'run' (it keeps moving on the ground instead of
+// teleporting into the sky). Take-off/landing ease the root height (no snap).
 //
 // EVERYTHING is done in the dragon GROUP's LOCAL frame (bones live under the
 // group; the group carries a uniform globalScale + a y-lift so rest feet sit at
@@ -48,6 +59,18 @@ const GAITS = {
   walk: { cadence: 0.85, duty: 0.68, stride: 0.55, lift: 0.20, bob: 1.0, undA: 0.20, undLambda: 0.50 },
   run:  { cadence: 1.65, duty: 0.52, stride: 0.98, lift: 0.42, bob: 2.0, undA: 0.30, undLambda: 0.55 },
 };
+
+// FLIGHT preset (the `fly` gait). Distances are GROUP-LOCAL (× globalScale for
+// world). `cadence` = wing-beats / second. A legless serpent reuses undA/undLambda
+// to "cloud-swim" through the air (no wing bones to flap).
+const FLY = {
+  cadence: 1.05,               // wing-beats per second
+  rise: 2.6,                   // group-local height gained aloft (cruise altitude)
+  speed: 1.15,                 // forward air speed at full amplitude
+  bob: 0.12,                   // vertical heave amplitude, synced to the beat
+  undA: 0.34, undLambda: 0.62, // serpent cloud-swim undulation
+};
+const AIR_EASE = 1.8;          // rate of the take-off / settle height blend (1/s)
 
 // Diagonal-sequence 4-beat footfall offsets (fraction of the cycle) — a leg
 // lifts when its own phase crosses `duty`. Diagonal pairs (hindL,foreR) /
@@ -95,7 +118,8 @@ export function createLocomotion(dragon, rig) {
   // Inert controller when there's nothing to drive.
   if (!dragon || !rig) {
     return { update() {}, setSpeed() {}, get speed() { return 'idle'; },
-      get plan() { return 'none'; }, dispose() {} };
+      get plan() { return 'none'; }, get canFly() { return false; },
+      get airborne() { return 0; }, dispose() {} };
   }
 
   const specs = dragon.userData.skeleton || [];
@@ -170,11 +194,29 @@ export function createLocomotion(dragon, rig) {
   // Trunk bones used for walk body-bob / weight-shift + neck counter-motion.
   const trunk = [10, 12, 14, 16].map((i) => boneByName[spineName(i)]).filter(Boolean);
   const neck = [0, 1, 2, 3].map((i) => boneByName[spineName(i)]).filter(Boolean);
+  const tailBones = [];
+  for (let j = 0; j < 12; j++) { const b = boneByName[tailName(j)]; if (b) tailBones.push(b); }
+
+  // -- Wing chains (forelimb) for flapping flight ------------------------------
+  // Gathered for both sides; flight only flaps when `canFlap` (a real wing plan).
+  const wingChains = [];
+  for (const side of ['L', 'R']) {
+    const pre = `fore${side}_`;
+    const ua = boneByName[pre + 'upperArm'];
+    if (!ua) continue;
+    const fingers = [];
+    for (let k = 0; k < 3; k++) { const b = boneByName[`${pre}finger0_${pad2(k)}`]; if (b) fingers.push(b); }
+    wingChains.push({ sign: side === 'L' ? 1 : -1, ua, fa: boneByName[pre + 'foreArm'], wr: boneByName[pre + 'wrist'], fingers });
+  }
+  const canFlap = foreIsWing && wingChains.length > 0;   // articulated wings
+  const canFly = canFlap || plan === 'serpent';          // serpent flies by cloud-swim
 
   // -- Mutable state -----------------------------------------------------------
   let speed = 'idle';
   let phase = 0;        // gait cycle phase [0,1)
   let wavePhase = 0;    // undulation wave phase (radians)
+  const groundY = dragon.position.y;   // rest ground height (world y); flight lifts from here
+  let air = 0;                         // airborne blend [0,1] — eased on take-off / landing
 
   // -- Analytic two-bone IK (upper+lower -> target T, all group-local) ----------
   // Emits LOCAL quaternions for the two bones. Accounts for the live parent world
@@ -230,15 +272,96 @@ export function createLocomotion(dragon, rig) {
 
   // -- Per-frame update --------------------------------------------------------
   function update(dt) {
-    if (speed === 'idle' || !GAITS[speed]) return;
     dt = Math.min(0.05, Math.max(0, dt));
-    const g = GAITS[speed];
+
+    // Airborne blend: ease toward flight height while flying, back to the ground
+    // otherwise — so take-off lifts and landing settles the root smoothly (no
+    // teleport). Runs even outside 'fly' so leaving flight glides back down.
+    const wantFly = (speed === 'fly');
+    air += ((wantFly ? 1 : 0) - air) * (1 - Math.exp(-AIR_EASE * dt));
+    if (air < 1e-4) air = 0;
+
+    // Fully grounded + idle => original no-op (frame reads exactly as before).
+    // Snap the root exactly back to the ground once on landing, then no-op after.
+    if (!wantFly && air === 0 && (speed === 'idle' || !GAITS[speed])) {
+      if (dragon.position.y !== groundY) dragon.position.y = groundY;
+      return;
+    }
 
     dragon.getWorldQuaternion(_grpInv).invert();   // group->local rotation, reused by IK
 
+    if (wantFly) { updateFlight(dt); return; }
+
+    // Descending out of flight but the gait is now idle: keep settling height.
+    if (air > 0) dragon.position.y = groundY + air * FLY.rise * globalScale;
+    if (speed === 'idle' || !GAITS[speed]) return;
+
+    const g = GAITS[speed];
     if (plan === 'serpent') updateSerpent(dt, g);
     else updateLegged(dt, g);
   }
+
+  // -- Flapping flight ---------------------------------------------------------
+  function updateFlight(dt) {
+    const amp = air;   // scales wing amplitude + air speed in during take-off
+
+    if (plan === 'serpent') {
+      // Cloud-swimming: a legless flyer undulates through the air (no wing bones).
+      updateSerpent(dt, FLY);   // sets the lateral wave + advances the root
+      dragon.position.y = groundY + (air * FLY.rise + FLY.bob * Math.sin(wavePhase) * amp) * globalScale;
+      return;
+    }
+
+    wavePhase += 2 * Math.PI * FLY.cadence * dt;
+    const beat = wavePhase;
+    // Cruise altitude + gentle vertical heave synced to the beat (body lifts on
+    // the powered down-stroke).
+    dragon.position.y = groundY + (air * FLY.rise + FLY.bob * Math.sin(beat) * amp) * globalScale;
+
+    if (canFlap) flapWings(beat, amp);
+    flightBody(beat, amp);
+    advanceRoot(dt, FLY.speed * amp);
+  }
+
+  // Beat the wing chains: shoulder leads, elbow/wrist/finger lag progressively
+  // (phase offset down the chain) so the membrane + finger tips trail — the
+  // characteristic whip. Roll (z) is the main flap axis (see the wings-open pose).
+  function flapWings(beat, amp) {
+    const s0 = Math.sin(beat);
+    const s1 = Math.sin(beat - 0.6);
+    const s2 = Math.sin(beat - 1.1);
+    const s3 = Math.sin(beat - 1.6);
+    for (const w of wingChains) {
+      const g = w.sign;
+      // upperArm: held out (spread) + big roll flap; a little fore/aft sweep on yaw.
+      setLocalEuler(w.ua, -0.14 * amp, g * (0.16 + 0.10 * Math.cos(beat)) * amp, g * (0.34 + 0.62 * s0) * amp);
+      if (w.fa) setLocalEuler(w.fa, -0.05 * amp, g * 0.08 * amp, g * (0.12 + 0.40 * s1) * amp);
+      if (w.wr) setLocalEuler(w.wr, 0, g * 0.05 * amp, g * (0.06 + 0.30 * s2) * amp);
+      for (let k = 0; k < w.fingers.length; k++) {
+        const f = 1 - 0.18 * k;                              // tips flex a touch less far
+        setLocalEuler(w.fingers[k], 0, g * 0.10 * amp * f, g * (0.08 + 0.24 * s3) * amp * f);
+      }
+    }
+  }
+
+  // Body attitude in flight: nose-up climb pitch, head levels/leads, hind legs
+  // tuck, tail lifts toward horizontal and trails as a rudder (springs add the
+  // real trailing lag on top). Composed onto the idle sway.
+  function flightBody(beat, amp) {
+    for (const b of trunk) compose(b, -0.05 * amp, 0, 0);    // pitch nose-up (climb)
+    for (const b of neck) compose(b, 0.03 * amp, 0, 0);      // head leads / levels
+    for (const leg of legs) {                                 // tuck the hind legs up
+      leg.upper.quaternion.setFromEuler(_euler.set(0.55 * amp, 0, 0, 'XYZ'));
+      leg.lower.quaternion.setFromEuler(_euler.set(-1.0 * amp, 0, 0, 'XYZ'));
+    }
+    const n = Math.max(1, tailBones.length - 1);
+    for (let j = 0; j < tailBones.length; j++) {
+      const t = j / n;
+      compose(tailBones[j], -0.045 * amp * (1 - 0.3 * t), 0.045 * Math.sin(beat - 1.3 - t * 1.2) * amp, 0);
+    }
+  }
+
+  function setLocalEuler(b, x, y, z) { b.quaternion.setFromEuler(_euler.set(x, y, z, 'XYZ')); }
 
   function updateLegged(dt, g) {
     phase = (phase + g.cadence * dt) % 1;
@@ -310,9 +433,14 @@ export function createLocomotion(dragon, rig) {
 
   return {
     update,
-    setSpeed(s) { if (s === 'idle' || GAITS[s]) speed = s; },
+    setSpeed(s) {
+      if (s === 'fly') { speed = canFly ? 'fly' : 'run'; return; }   // wingless -> fall back to run
+      if (s === 'idle' || GAITS[s]) speed = s;
+    },
     get speed() { return speed; },
     get plan() { return plan; },
+    get canFly() { return canFly; },
+    get airborne() { return air; },   // 0 grounded .. 1 at cruise altitude
     dispose() {},
   };
 }
