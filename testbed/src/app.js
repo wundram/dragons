@@ -19,6 +19,7 @@ import {
 } from './generator.js';
 import { EMOTIONS, emotionParams } from './face.js';
 import { upgradeToSkinned } from './rig.js';
+import { createLocomotion } from './locomotion.js';
 import { POSES, POSE_NAMES } from './poses.js';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,8 @@ let genome = { ...DEFAULT_GENOME };
 let age = 0.0;
 let currentDragon = null;
 let currentRig = null;        // AnimRig for the live dragon (null in voxel/capsule)
+let currentLoco = null;       // LocomotionController for the live dragon (null in voxel/capsule)
+let currentGait = 'idle';     // 'idle' | 'walk' | 'run' — persists across rebuilds
 let currentPoseName = 'idle'; // last applied pose; re-applied across rebuilds
 let rebuildTimer = null;
 
@@ -321,6 +324,10 @@ function rebuild() {
   // so the age slider scrubs a POSED dragon.
   currentRig = upgradeToSkinned(currentDragon);
   if (currentRig) applyPoseByName(currentPoseName);
+  // Morphology-adaptive locomotion layer over the pose/idle pipeline (smooth mode
+  // only; inert otherwise). Restore the persisted gait so it survives rebuilds.
+  currentLoco = createLocomotion(currentDragon, currentRig);
+  if (currentLoco) currentLoco.setSpeed(currentGait);
   // Refit the soft contact-shadow blob to the new silhouette (high tier only).
   refreshContactShadow();
   updateReadout();
@@ -819,14 +826,32 @@ function renderFrame() {
 }
 
 const animClock = new THREE.Clock();
+let lastLocoT = 0;
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  const t = animClock.getElapsedTime();
+  const dt = Math.min(0.05, t - lastLocoT);
+  lastLocoT = t;
   // Gentle always-on idle: breathing + low-amplitude axial sway + ear idle,
   // composed on top of the current pose. Cheap, sine-based, deterministic.
   // (Runs BEFORE the render so the posed/idle frame is what gets drawn.)
-  if (currentRig) currentRig.updateIdle(animClock.getElapsedTime());
+  if (currentRig) currentRig.updateIdle(t);
+  // Locomotion layer: composed AFTER the pose/idle step, BEFORE the render. When
+  // the gait is 'idle' this is a no-op, so the frame reads exactly like before.
+  if (currentLoco) currentLoco.update(dt);
   renderFrame();
+}
+
+// Set the ground gait: 'idle' | 'walk' | 'run'. Switching to idle re-applies the
+// current pose so the leg/spine bones the gait overrode return to their rest
+// (the locomotion controller writes bone quaternions directly during a gait).
+function setGait(name) {
+  if (name !== 'idle' && name !== 'walk' && name !== 'run') return false;
+  currentGait = name;
+  if (currentLoco) currentLoco.setSpeed(name);
+  if (name === 'idle') applyPoseByName(currentPoseName);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -880,4 +905,15 @@ window.__testbed = {
   resetPose: () => { currentPoseName = 'idle'; if (currentRig) currentRig.resetPose(); },
   // Freeze/enable the idle layer (pose gallery freezes it for clean stills).
   setIdle: (on) => { if (currentRig) currentRig.idleEnabled = !!on; },
+  // --- Locomotion API (Phase-1 animation) --------------------------------
+  // Morphology-adaptive ground gait. 'idle' = current gentle idle (default);
+  // 'walk' / 'run' drive a step cycle (quadruped/biped) or serpentine undulation
+  // per the measured body plan, translating the root forward. Persists across
+  // rebuilds (age scrub / genome edits keep walking).
+  setGait,
+  get gait() { return currentGait; },
+  get gaitPlan() { return currentLoco ? currentLoco.plan : 'none'; },
+  // Current root (group) world position — advances as the dragon walks; handy for
+  // verifying forward translation ("does it actually move?").
+  get rootPos() { return currentDragon ? currentDragon.position.clone() : null; },
 };
