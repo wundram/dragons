@@ -58,19 +58,6 @@ if (!SUBS.includes(sub)) {
   die(`usage: node gallery.mjs <${SUBS.join('|')}> [flags]  (see header comment)`);
 }
 
-// --- poses: stub until Step 2 gives us a pose API --------------------------
-if (sub === 'poses') {
-  // TODO: wire once bones can be posed (Step 2 rig).
-  // Planned shape: a POSES table of named bone-rotation sets
-  //   { idle, walkContact, rearUp, wingsOpen, roar, curlSleep }
-  // then per pose: apply rotations via the future pose API
-  // (e.g. window.__testbed.setPose(name) or per-bone quaternion writes on
-  // dragon.userData.skeleton), re-frame, clip-screenshot the canvas, and
-  // montage a grid captioned with pose names — exactly like the other modes.
-  console.log('poses gallery not yet available: needs pose API (Step 2 rig)');
-  process.exit(0);
-}
-
 const out = String(arg('out', '../out/gallery'));
 const url = String(arg('url', 'http://localhost:8000/'));
 const seed = Number(arg('seed', 1));
@@ -181,6 +168,47 @@ async function shootCell(genome, age, file) {
 }
 
 // ---------------------------------------------------------------------------
+// shootPose — like shootCell but applies a named POSE (from the Phase-0 rig)
+// with the idle layer FROZEN, so the pose sheet is a clean deterministic still.
+// ---------------------------------------------------------------------------
+async function shootPose(genome, age, pose, file) {
+  await page.evaluate(async ({ genome, age, pose }) => {
+    const THREE = await import('three');
+    const t = window.__testbed;
+    Object.assign(t.genome, genome);
+    const ageEl = document.querySelectorAll('input[type=range]')[0];
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(ageEl, String(age));
+    ageEl.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 80));
+    // freeze the idle + strike the pose, then frame the posed dragon.
+    if (t.setIdle) t.setIdle(false);
+    if (t.applyPose) t.applyPose(pose);
+    const cam = t.camera;
+    const box = new THREE.Box3().setFromObject(t.dragon);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+    const fov = (cam.fov || 50) * Math.PI / 180;
+    const dist = (radius / Math.sin(fov / 2)) * 1.2;
+    const dir = new THREE.Vector3(0.55, 0.30, 1).normalize();
+    cam.position.copy(center.clone().add(dir.multiplyScalar(dist)));
+    cam.near = dist / 100; cam.far = dist * 100;
+    cam.lookAt(center); cam.updateProjectionMatrix();
+    if (t.controls) { t.controls.target.copy(center); t.controls.update(); }
+    t.renderer.render(t.scene, cam);
+  }, { genome, age, pose });
+  await new Promise(r => setTimeout(r, 200));
+  const clip = await page.evaluate(() => {
+    const r = document.querySelector('canvas').getBoundingClientRect();
+    return { x: Math.ceil(r.x), y: Math.ceil(r.y),
+             width: Math.floor(r.width) - 1, height: Math.floor(r.height) - 1 };
+  });
+  await page.screenshot({ path: file, type: 'png', clip });
+  return file;
+}
+
+// ---------------------------------------------------------------------------
 // ImageMagick compositing
 // ---------------------------------------------------------------------------
 function montageSheet(cells, labels, tile, title, sheetPath) {
@@ -272,6 +300,27 @@ if (sub === 'variation') {
       `Random ${tag} @ age ${fmt(age)} (seed ${seed})`,
       path.join(out, `variation_random_${tag}_seed${seed}.png`)));
   } else die(`--mode must be sweep or random, got: ${mode}`);
+}
+
+if (sub === 'poses') {
+  // Pose-sheet: render the current dragon in each named POSE (Phase-0 rig) as a
+  // montage contact sheet — how we evaluate the rig. Needs SMOOTH skin (the rig
+  // only skins the marching-cubes body); the page defaults to smooth.
+  const which = arg('archetype', null);
+  const genome = await resolveGenome(which ?? arg('genome', null), which ? 'archetype' : 'genome');
+  const age = Number(arg('age', 1));
+  const poseNames = await page.evaluate(() => (window.__testbed && window.__testbed.poseNames) || []);
+  if (!poseNames.length) die('no poses exposed by window.__testbed.poseNames (is the rig wired?)');
+  capCells(poseNames.length, 'pose sheet');
+  const cols = Math.ceil(Math.sqrt(poseNames.length));
+  const cells = [], labels = [];
+  for (let i = 0; i < poseNames.length; i++) {
+    cells.push(await shootPose(genome, age, poseNames[i], path.join(cellsDir, `pose_${i}.png`)));
+    labels.push(poseNames[i]);
+  }
+  const name = which ? String(which) : 'custom';
+  sheets.push(montageSheet(cells, labels, `${cols}x`,
+    `Poses — ${name} @ age ${fmt(age)}`, path.join(out, `poses_${name}.png`)));
 }
 
 if (sub === 'tree') {

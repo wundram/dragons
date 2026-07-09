@@ -853,12 +853,16 @@ function addSphere(group, pos, r, mat, scale = null) {
 }
 
 // Draw a bone's capsule (pos->tail, envelopeRadius->rTail) + a joint sphere at pos.
+// Stamps `userData.boneName` on every mesh it adds so the animation rig can rigid-
+// attach these layered capsules (fingers/toes/claws) to their bone (rig.js).
 function renderBoneCapsule(group, bone, mat) {
   if (bone.envelopeRadius < EPS) return;
+  const start = group.children.length;
   addSphere(group, bone.pos, bone.envelopeRadius, mat);
   if (bone.tail && bone.rTail !== undefined) {
     addTaperedCapsule(group, bone.pos, bone.tail, bone.envelopeRadius, bone.rTail, mat);
   }
+  for (let i = start; i < group.children.length; i++) group.children[i].userData.boneName = bone.name;
 }
 
 // ---------------------------------------------------------------------------

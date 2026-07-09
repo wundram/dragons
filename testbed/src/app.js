@@ -12,6 +12,8 @@ import {
   generateDragon, setDragonFace,
 } from './generator.js';
 import { EMOTIONS, emotionParams } from './face.js';
+import { upgradeToSkinned } from './rig.js';
+import { POSES, POSE_NAMES } from './poses.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -19,6 +21,8 @@ import { EMOTIONS, emotionParams } from './face.js';
 let genome = { ...DEFAULT_GENOME };
 let age = 0.0;
 let currentDragon = null;
+let currentRig = null;        // AnimRig for the live dragon (null in voxel/capsule)
+let currentPoseName = 'idle'; // last applied pose; re-applied across rebuilds
 let rebuildTimer = null;
 
 // Skin/view settings live on window.__* so the headless tools (render.mjs /
@@ -108,7 +112,18 @@ function rebuild() {
   disposeDragon(currentDragon);
   currentDragon = next;
   scene.add(currentDragon);
+  // Convert the freshly-built body to a live SkinnedMesh rig (smooth mode only;
+  // returns null for voxel/capsule, which stay static). Re-apply the current pose
+  // so the age slider scrubs a POSED dragon.
+  currentRig = upgradeToSkinned(currentDragon);
+  if (currentRig) applyPoseByName(currentPoseName);
   updateReadout();
+}
+
+// Apply a named pose from the POSES table to the live rig (no-op if unskinned).
+function applyPoseByName(name) {
+  currentPoseName = name;
+  if (currentRig && POSES[name]) currentRig.applyPose(POSES[name]);
 }
 
 // Throttle rebuilds so dragging a slider stays smooth.
@@ -510,9 +525,13 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
+const animClock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
+  // Gentle always-on idle: breathing + low-amplitude axial sway + ear idle,
+  // composed on top of the current pose. Cheap, sine-based, deterministic.
+  if (currentRig) currentRig.updateIdle(animClock.getElapsedTime());
   renderer.render(scene, camera);
 }
 
@@ -529,6 +548,16 @@ window.__testbed = {
   get genome() { return genome; },
   get age() { return age; },
   get dragon() { return currentDragon; },
+  get rig() { return currentRig; },
   scene, camera, renderer,
   regenerate: rebuild,
+  controls,
+  // --- Pose API (Phase-0 animation) --------------------------------------
+  poses: POSES,
+  poseNames: POSE_NAMES,
+  applyPose: (name) => { applyPoseByName(name); return !!(currentRig && POSES[name]); },
+  setBoneRotation: (bone, x, y, z) => currentRig ? currentRig.setBoneRotation(bone, x, y, z) : false,
+  resetPose: () => { currentPoseName = 'idle'; if (currentRig) currentRig.resetPose(); },
+  // Freeze/enable the idle layer (pose gallery freezes it for clean stills).
+  setIdle: (on) => { if (currentRig) currentRig.idleEnabled = !!on; },
 };
