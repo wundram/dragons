@@ -59,7 +59,9 @@ The test bed graduates into the **Dragon Explorer** app. Pursue **top-tier anima
 - Unlocks the deferred **pose-sheet gallery** and the dramatic spread-wing pose.
 - Research: `research/procedural-animation-behavior.md`.
 - [x] **Phase 0 (foundation) DONE** — `testbed/src/rig.js` (Bone tree from `userData.skeleton`, pelvis re-rooting, body→`SkinnedMesh` bound to existing skin weights; layered wings/ears/spikes/face follow bones) + `testbed/src/poses.js` (pose API + POSES: idle/stand/rear-up/wings-open/roar/curl-sleep/walk-contact) + `gallery.mjs poses` sheet + gentle breathing/tail-sway idle. Verified across wyvern/drake/snake. Voxel degrades gracefully (unposed).
-- [ ] Next: gaits/IK (walk/run, morphology-adaptive) → flapping flight + spring secondary motion → behavior FSM (the 9 behaviors).
+- [x] **Locomotion DONE** — `locomotion.js`: morphology-adaptive walk/run (quadruped diagonal / biped alternating / serpent undulation) + 2-bone IK foot-planting + root motion; flapping **flight** (airborne, trailing membrane) with wingless fallback.
+- [x] **Secondary motion DONE** — `springs.js`: spring-bone follow-through (tail/ears/wing tips), composes over emotions, stability-clamped.
+- [x] **Behavior FSM DONE** — `behavior.js`: 9 behaviors (rest/roost/stand/posture/beg/play/walk/run/fly) with cross-fade transitions, per-archetype filtering, mood composition, and an **Auto (live)** mode + UI Behavior selector. Item 1 complete.
 
 ### 3b. High-fidelity rendering upgrade + integration (COMPLETE)
 Research: `research/high-fidelity-rendering.md`; integration review + fixes: `design/rendering-integration-review.md`.
