@@ -104,6 +104,68 @@ export const POSES = {
     jaw: [d(4), 0, 0],
   },
 
+  // Roost: a settled perch — body squared low, WINGS FOLDED/CLOAKED against the
+  // flanks (opposite of wings-open), head tucked back a touch, tail curled around.
+  // Reads "settled, content" (used by the roosting behavior).
+  roost: {
+    ...neck(0, 8),                   // head lowered/tucked a little
+    spine_18: [d(3), 0, 0],
+    ...bilateral('foreL', 'foreR', {
+      _upperArm: [d(12), d(-8), d(-16)],   // draw the wing in & down (cloak)
+      _foreArm: [d(38), 0, d(-6)],
+      _wrist: [0, 0, d(-12)],
+      _finger0_00: [0, d(-10), 0], _finger0_01: [0, d(-8), 0],
+    }),
+    tail_00: [d(6), d(10), 0], tail_01: [d(6), d(12), 0], tail_02: [d(5), d(14), 0],
+    tail_03: [d(4), d(14), 0], tail_04: [d(3), d(12), 0], tail_05: [d(2), d(10), 0],
+    jaw: [d(2), 0, 0],
+  },
+
+  // Beg: sit back on the haunches, torso reared up ~45°, forelimbs raised paws-up,
+  // head up toward the viewer, tail down as a counterweight. Cute! (begging behavior)
+  beg: {
+    spine_18: [d(-17), 0, 0], spine_16: [d(-17), 0, 0], spine_14: [d(-15), 0, 0],
+    spine_12: [d(-13), 0, 0], spine_10: [d(-10), 0, 0], spine_08: [d(-7), 0, 0],
+    ...neck(0, 22),                  // bring the head back up to look forward
+    ...bilateral('foreL', 'foreR', {
+      _upperArm: [d(-72), 0, d(12)], _foreArm: [d(-62), 0, 0], _wrist: [d(-22), 0, 0],
+    }),
+    hindL_upper: [d(42), 0, 0], hindL_lower: [d(-72), 0, 0],
+    hindR_upper: [d(42), 0, 0], hindR_lower: [d(-72), 0, 0],
+    tail_00: [d(22), 0, 0], tail_01: [d(18), 0, 0], tail_02: [d(13), 0, 0],
+    tail_03: [d(9), 0, 0], tail_04: [d(5), 0, 0],
+    jaw: [d(11), 0, 0],
+  },
+
+  // Play-bow: front lowered (elbows toward the ground), rear up, head up looking
+  // forward, tail raised high — the universal "let's play!" invitation (playing).
+  'play-bow': {
+    spine_18: [d(11), 0, 0], spine_16: [d(13), 0, 0], spine_14: [d(13), 0, 0],
+    spine_12: [d(10), 0, 0], spine_10: [d(7), 0, 0],
+    ...neck(0, -26),                 // head comes UP to look ahead
+    ...bilateral('foreL', 'foreR', { _upperArm: [d(30), 0, d(8)], _foreArm: [d(22), 0, 0] }),
+    tail_00: [d(-28), 0, 0], tail_01: [d(-26), 0, 0], tail_02: [d(-22), 0, 0],
+    tail_03: [d(-17), 0, 0], tail_04: [d(-12), 0, 0], tail_05: [d(-8), 0, 0],
+    jaw: [d(15), 0, 0],
+  },
+
+  // Posture / display: chest raised, neck reared into an S, WINGS HALF-SPREAD to
+  // look big, jaw open, tail raised. Reads "impressive / threat" (posturing).
+  posture: {
+    spine_18: [d(-14), 0, 0], spine_16: [d(-14), 0, 0], spine_14: [d(-12), 0, 0],
+    spine_12: [d(-10), 0, 0], spine_10: [d(-7), 0, 0],
+    ...neck(0, 28),                  // head up, S-curve
+    ...bilateral('foreL', 'foreR', {
+      _upperArm: [d(-24), d(20), d(30)],
+      _foreArm: [d(-6), d(8), d(16)],
+      _wrist: [0, 0, d(10)],
+      _finger0_00: [0, d(16), 0], _finger0_01: [0, d(10), 0],
+    }),
+    tail_00: [d(-16), 0, 0], tail_01: [d(-14), 0, 0], tail_02: [d(-10), 0, 0],
+    tail_03: [d(-6), 0, 0], tail_04: [d(-3), 0, 0],
+    jaw: [d(22), 0, 0],
+  },
+
   // Walk contact pose (a single mid-stride snapshot): opposite fore/hind reach,
   // a little spine counter-yaw. Not a gait — just a readable stepping key pose.
   'walk-contact': {

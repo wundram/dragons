@@ -334,6 +334,24 @@ function _makeRig(state) {
     return true;
   }
 
+  // Like applyPose but takes a map of boneName -> THREE.Quaternion (already the
+  // final local rotation). Used by the behavior layer to write a CROSS-FADED pose
+  // each frame (slerped between two behaviors) directly into poseBase, so the idle
+  // sway / gait / springs still compose on top exactly as with applyPose. Bones not
+  // present in the map are reset to identity (the union of the two behaviors' bones
+  // is what the caller passes, so this correctly clears bones leaving the pose).
+  function applyPoseQuats(quatMap) {
+    resetPose();
+    if (!quatMap) return true;
+    for (const name in quatMap) {
+      const b = boneObj[name];
+      if (!b) continue;                       // morphology-tolerant
+      poseBase[name].copy(quatMap[name]);
+      b.quaternion.copy(quatMap[name]);
+    }
+    return true;
+  }
+
   // -- gentle always-on idle (composed on top of poseBase) --------------------
   // A low-amplitude lateral traveling wave down the axial chain (breathing life
   // + tail sway + snake undulation-at-rest), subtle ribcage-breathing pitch, and
@@ -388,6 +406,7 @@ function _makeRig(state) {
     boneIndex: state.boneIndex,
     setBoneRotation,
     applyPose,
+    applyPoseQuats,
     resetPose,
     updateIdle,
     dispose,

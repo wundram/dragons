@@ -469,11 +469,22 @@
           </div>
         </section>
 
-        <!-- Motion: strike a named pose on the live rig (smooth skin only) -->
+        <!-- Motion: the behavior state machine (9 behaviors) + auto/live mode, plus
+             the manual Stance pose. NB: #behavior is added AFTER #emotion in the
+             document, so #emotion stays the FIRST <select> (harness contract). -->
         <section class="group">
-          <h3>Pose</h3>
+          <h3>Behavior</h3>
           <div class="row">
-            <label title="Strike a named pose on the live rig (smooth skin only)">Stance</label>
+            <label title="Autonomous behavior — resting/roosting/standing/posturing/begging/playing/walking/running/flying (per-archetype filtered), or 'manual (pose)' to hand control to the Stance select">Behavior</label>
+            <select id="behavior"></select>
+            <span></span>
+          </div>
+          <div class="row chk">
+            <label title="Auto (live): let the brain drive a weighted random walk over the behaviors with smooth transitions — the creature lives its life">Auto (live)</label>
+            <input id="autoLive" type="checkbox" />
+          </div>
+          <div class="row">
+            <label title="Strike a named pose on the live rig (manual behavior only; smooth skin only)">Stance</label>
             <select id="pose"></select>
             <span></span>
           </div>
