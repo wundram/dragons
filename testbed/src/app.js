@@ -76,10 +76,24 @@ const tierCfg = () => TIERS[window.__renderTier] ?? TIERS.high;
 // Scene setup
 // ---------------------------------------------------------------------------
 const canvas = document.getElementById('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+// powerPreference:'high-performance' asks the OS/browser for the DISCRETE GPU on
+// dual-GPU laptops (the showcase was silently running on the integrated GPU).
+// preserveDrawingBuffer is deliberately OMITTED — it forces the driver to keep a
+// readable copy of every frame and defeats GPU fast paths. canvas.toBlob()/
+// toDataURL() (screenshot + gallery + thumbnails) still capture correctly because
+// every capture site calls renderFrame() and reads the canvas SYNCHRONOUSLY in the
+// same task, before the compositor can clear the buffer.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.info.autoReset = false;   // reset once per animate frame so the perf HUD
+                                   // reads whole-frame draw calls (all passes incl.
+                                   // shadow + transmission), not just the last pass.
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// PERF: the shadow map is NOT re-rendered every frame. autoUpdate is off; the
+// animate loop throttles it (every few frames while the rig breathes/moves) and
+// forces a refresh after any rebuild / pose change (see shouldUpdateShadow()).
+renderer.shadowMap.autoUpdate = false;
 // Color management + filmic tone mapping — the single biggest quality jump. sRGB
 // output is the r160 default; set it explicitly so the pin can't drift. ACES maps
 // the HDR IBL/lights into a believable display range (exposure set per tier).
@@ -118,16 +132,18 @@ controls.addEventListener('start', () => { userMovedCamera = true; });
 const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
 key.position.set(5, 8, 6);
 key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
+// PERF: 1024² shadow map (was 2048²) — quarter the shadow fill, still soft under
+// VSM blur at this camera distance.
+key.shadow.mapSize.set(1024, 1024);
 key.shadow.camera.near = 1; key.shadow.camera.far = 30;
 key.shadow.camera.left = -8; key.shadow.camera.right = 8;
 key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
 key.shadow.bias = -0.0004;
 key.shadow.normalBias = 0.02;
 // VSM softness (only takes effect under VSMShadowMap = high tier; PCFSoft ignores
-// radius). blurSamples trades a little cost for a smoother penumbra.
+// radius). blurSamples 8 (was 16) halves the blur cost; penumbra stays smooth.
 key.shadow.radius = 7;
-key.shadow.blurSamples = 16;
+key.shadow.blurSamples = 8;
 scene.add(key);
 
 const fill = new THREE.DirectionalLight(0x9fc0ff, 0.7);
@@ -229,28 +245,49 @@ function refreshContactShadow() {
 //     stays set — it's consumed by OutputPass here, and by the cheap tier's plain
 //     renderer.render (which draws straight to the canvas and tone-maps there).
 // ---------------------------------------------------------------------------
-const _bufSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+// PERF: the expensive post-fx passes render at a CAPPED pixel ratio (≤1.5×), not
+// the full 2× Retina drawing buffer — the biggest fill-rate win on a HiDPI screen.
+// The canvas backing store stays at 2× (crisp final blit; cheap tier draws native),
+// but the composer/GTAO/bloom internal targets are sized off POSTFX_MAX_PR. The
+// final OutputPass upsamples the beauty to fill the canvas — 3D reads slightly
+// softer than native 2× but the whole chain runs at ~56% of the pixels.
+const POSTFX_MAX_PR = 1.5;   // effective pixel ratio cap for the post-fx chain
+const GTAO_SCALE = 0.5;      // GTAO (the heaviest pass) at HALF the post-fx res
+// Post-fx target size = css size × min(devicePixelRatio, POSTFX_MAX_PR).
+function postfxSize(v = new THREE.Vector2()) {
+  const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const pr = renderer.getPixelRatio() || 1;
+  const capped = Math.min(pr, POSTFX_MAX_PR);
+  return v.set(Math.max(2, Math.round(buf.x / pr * capped)),
+               Math.max(2, Math.round(buf.y / pr * capped)));
+}
+const _fx = postfxSize();
 const composer = new EffectComposer(
   renderer,
-  new THREE.WebGLRenderTarget(_bufSize.x, _bufSize.y, {
-    samples: 4, type: THREE.HalfFloatType,
+  new THREE.WebGLRenderTarget(_fx.x, _fx.y, {
+    samples: 2, type: THREE.HalfFloatType,   // MSAA 2 (was 4) — half the sample cost
   })
 );
+composer.setPixelRatio(1);   // we size the composer explicitly in CSS px already
+composer.setSize(_fx.x, _fx.y);
 composer.addPass(new RenderPass(scene, camera));
-const gtaoPass = new GTAOPass(scene, camera, _bufSize.x, _bufSize.y);
+// GTAO runs at HALF the post-fx resolution (soft AO tolerates it) with 8 samples
+// (was 16). setSize on the pass drives its own gbuffer + AO + denoise targets.
+const gtaoPass = new GTAOPass(scene, camera,
+  Math.round(_fx.x * GTAO_SCALE), Math.round(_fx.y * GTAO_SCALE));
 gtaoPass.output = GTAOPass.OUTPUT.Default;   // AO multiplied over the beauty pass
 gtaoPass.blendIntensity = 0.85;
 // World-space AO tuned for a ~10-unit dragon: a modest radius seats ears↔skull,
 // legs↔body, spikes↔skin without haloing the silhouette.
 gtaoPass.updateGtaoMaterial({
   radius: 0.55, distanceExponent: 1.0, thickness: 1.0, scale: 1.0,
-  samples: 16, screenSpaceRadius: false,
+  samples: 8, screenSpaceRadius: false,
 });
 composer.addPass(gtaoPass);
-// Subtle, HDR-driven bloom — only true highlights (eye catchlights, rim glints)
-// bloom. strength 0.22 / radius 0.5 / threshold 0.85.
+// Subtle, HDR-driven bloom at HALF the post-fx res (bloom is inherently blurry, so
+// half-res is free quality). strength 0.22 / radius 0.5 / threshold 0.85.
 const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(_bufSize.x, _bufSize.y), 0.22, 0.5, 0.85
+  new THREE.Vector2(Math.round(_fx.x * 0.5), Math.round(_fx.y * 0.5)), 0.22, 0.5, 0.85
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());   // ACES + sRGB, applied ONCE, at the end
@@ -283,13 +320,15 @@ function applyTier() {
   // map type at runtime needs a shadow-map refresh + material recompile.
   if (renderer.shadowMap.type !== cfg.shadowType) {
     renderer.shadowMap.type = cfg.shadowType;
-    renderer.shadowMap.needsUpdate = true;
     scene.traverse((n) => {
       if (!n.material) return;
       const mats = Array.isArray(n.material) ? n.material : [n.material];
       for (const m of mats) m.needsUpdate = true;
     });
   }
+  // Force a shadow refresh (autoUpdate is off; a bare needsUpdate=true here would be
+  // clobbered by the next animate frame's throttle decision).
+  requestShadowRefresh(2);
   // Darker, rougher ground disc for the high vitrine; original slate for cheap.
   ground.material.color.setHex(cfg.groundColor);
   ground.material.roughness = cfg.groundRough;
@@ -351,6 +390,8 @@ function rebuild() {
   }
   // Refit the soft contact-shadow blob to the new silhouette (high tier only).
   refreshContactShadow();
+  // The geometry changed — force a burst of shadow-map refreshes (autoUpdate off).
+  requestShadowRefresh(2);
   updateReadout();
 }
 
@@ -391,7 +432,7 @@ function frameDragon(force = false) {
 // Apply a named pose from the POSES table to the live rig (no-op if unskinned).
 function applyPoseByName(name) {
   currentPoseName = name;
-  if (currentRig && POSES[name]) currentRig.applyPose(POSES[name]);
+  if (currentRig && POSES[name]) { currentRig.applyPose(POSES[name]); requestShadowRefresh(2); }
 }
 
 // Throttle rebuilds so dragging a slider stays smooth.
@@ -1188,11 +1229,13 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  // Keep the composer + its internal-target passes matched to the drawing buffer.
-  const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
-  composer.setSize(buf.x, buf.y);
-  gtaoPass.setSize(buf.x, buf.y);
-  bloomPass.setSize(buf.x, buf.y);
+  // Size the post-fx chain off the CAPPED pixel ratio (≤1.5×), not the full 2×
+  // drawing buffer — GTAO at half of that, bloom at half. The final OutputPass
+  // upsamples to fill the 2× canvas.
+  const fx = postfxSize();
+  composer.setSize(fx.x, fx.y);
+  gtaoPass.setSize(Math.round(fx.x * GTAO_SCALE), Math.round(fx.y * GTAO_SCALE));
+  bloomPass.setSize(Math.round(fx.x * 0.5), Math.round(fx.y * 0.5));
 }
 window.addEventListener('resize', resize);
 
@@ -1203,9 +1246,76 @@ window.addEventListener('resize', resize);
 // via renderer.render (tone-mapped by the renderer). Both write the final frame to
 // the canvas, so canvas.toDataURL()/toBlob() (gallery + PNG) capture the composed
 // image either way.
-function renderFrame() {
+function _dispatchRender() {
   if (tierCfg().composer) composer.render();
   else renderer.render(scene, camera);
+}
+
+// Public one-off render entry point — the PNG screenshot, in-app gallery cells,
+// breeding thumbnails, and the headless pose sheet (gallery.mjs t.renderFrame())
+// all route through here. Because renderer.shadowMap.autoUpdate is OFF, a one-off
+// render must force a fresh shadow map (the animate-loop throttler doesn't run for
+// these). Both tiers write the final frame to the canvas, so toDataURL()/toBlob()
+// capture the composed image.
+function renderFrame() {
+  renderer.info.reset();
+  renderer.shadowMap.needsUpdate = true;
+  _dispatchRender();
+}
+
+// --- throttled soft shadows ------------------------------------------------
+// autoUpdate is off; decide per animate-frame whether to re-render the shadow map.
+const SHADOW_EVERY = 3;   // refresh cadence while the rig is live (breathing/moving)
+let _shadowTick = 0;
+let _shadowForce = 0;     // queued forced refreshes (rebuild / pose / tier change)
+function requestShadowRefresh(n = 2) { _shadowForce = Math.max(_shadowForce, n); }
+function shouldUpdateShadow() {
+  if (_shadowForce > 0) { _shadowForce--; return true; }
+  // A smooth-mode rig is never fully static (idle breathing/sway), so refresh every
+  // few frames. Static skins (voxel/capsule = no rig) hold the last shadow until the
+  // next forced refresh (a rebuild), so fully-static frames cost zero shadow work.
+  if (currentRig) return (_shadowTick++ % SHADOW_EVERY) === 0;
+  return false;
+}
+
+// --- perf HUD (real-GPU validation) ----------------------------------------
+// Rolling FPS / frame-ms + whole-frame draw calls / triangles + tier/passes. Cheap
+// (recomputed ~4×/sec). Toggle with the backtick key; also readable at window.__perf.
+const perfHud = document.getElementById('perfHud');
+let perfVisible = false;
+const perf = { fps: 0, ms: 0, calls: 0, triangles: 0, tier: '', passes: 0 };
+if (typeof window !== 'undefined') window.__perf = perf;
+let _perfLast = (typeof performance !== 'undefined' ? performance.now() : 0);
+let _perfAccum = 0, _perfFrames = 0, _perfPaint = _perfLast;
+function paintPerfHud() {
+  if (!perfHud) return;
+  perfHud.innerHTML =
+    `<b>${perf.fps.toFixed(0)} fps</b> · ${perf.ms.toFixed(1)} ms` +
+    `<br>calls ${perf.calls} · tris ${(perf.triangles / 1000).toFixed(1)}k` +
+    `<br>tier ${perf.tier} · ${perf.passes} pass${perf.passes === 1 ? '' : 'es'}`;
+}
+function perfTick() {
+  const now = performance.now();
+  _perfAccum += now - _perfLast; _perfLast = now; _perfFrames++;
+  if (now - _perfPaint >= 250) {
+    perf.ms = _perfAccum / Math.max(1, _perfFrames);
+    perf.fps = perf.ms > 0 ? 1000 / perf.ms : 0;
+    perf.calls = renderer.info.render.calls;
+    perf.triangles = renderer.info.render.triangles;
+    perf.tier = window.__renderTier;
+    perf.passes = tierCfg().composer ? composer.passes.length : 1;
+    _perfAccum = 0; _perfFrames = 0; _perfPaint = now;
+    if (perfVisible) paintPerfHud();
+  }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === '`' || e.key === '~') {
+      perfVisible = !perfVisible;
+      if (perfHud) perfHud.style.display = perfVisible ? 'block' : 'none';
+      if (perfVisible) paintPerfHud();
+    }
+  });
 }
 
 const animClock = new THREE.Clock();
@@ -1231,7 +1341,11 @@ function animate() {
   // Secondary spring motion: the LAST bone pass (after locomotion), so tail/ears/
   // wing tips lag & settle on top of whatever pose/gait/emotion produced.
   if (currentSprings) currentSprings.update(dt);
-  renderFrame();
+  // Reset draw-call stats for this frame, decide the throttled shadow refresh, draw.
+  renderer.info.reset();
+  renderer.shadowMap.needsUpdate = shouldUpdateShadow();
+  _dispatchRender();
+  perfTick();
 }
 
 // Set the gait: 'idle' | 'walk' | 'run' | 'fly'. Switching to idle re-applies the
@@ -1269,6 +1383,30 @@ applyTier();
 rebuild();
 frameDragon();   // frame-on-boot: fit the hero shot instead of the face close-up
 animate();
+
+// One-time perf-proxy summary (headless SwiftShader can't measure real-GPU FPS, so
+// we log the GPU-agnostic proxies: whole-frame draw calls + every post-fx target
+// size / sample count / shadow-map size). Logged after a few frames so
+// renderer.info.render reflects a full composed frame.
+setTimeout(() => {
+  const fx = postfxSize();
+  const buf = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const rt = composer.renderTarget1;
+  console.log('[perf] render-path proxies:', JSON.stringify({
+    tier: window.__renderTier,
+    drawCallsPerFrame: renderer.info.render.calls,
+    trianglesPerFrame: renderer.info.render.triangles,
+    canvasDrawingBuffer: [buf.x, buf.y],
+    postfxTarget: [fx.x, fx.y],
+    composerMSAASamples: rt ? (rt.samples ?? 0) : 0,
+    gtaoTarget: [Math.round(fx.x * GTAO_SCALE), Math.round(fx.y * GTAO_SCALE)],
+    gtaoSamples: 8,
+    bloomTarget: [Math.round(fx.x * 0.5), Math.round(fx.y * 0.5)],
+    shadowMap: [key.shadow.mapSize.x, key.shadow.mapSize.y],
+    shadowAutoUpdate: renderer.shadowMap.autoUpdate,
+    passes: tierCfg().composer ? composer.passes.length : 1,
+  }));
+}, 1200);
 
 // Expose a tiny debug hook for the orchestrator / console verification.
 window.__testbed = {

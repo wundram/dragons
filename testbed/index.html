@@ -308,6 +308,17 @@
     .stagePlate .txt span { display: block; color: var(--faint); letter-spacing: .16em;
       font-size: 7px; margin-top: 2px; }
 
+    /* perf HUD — top-left telemetry pill (toggle with `). Monospace so the
+       numbers don't jitter width as they update. */
+    #perfHud {
+      position: absolute; top: 12px; left: 14px; z-index: 8; display: none;
+      pointer-events: none; font: 11px/1.45 var(--f-mono, monospace);
+      color: #d8f0ff; background: rgba(8,10,15,.72); backdrop-filter: blur(6px);
+      padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(120,160,200,.28);
+      letter-spacing: .02em; white-space: nowrap;
+    }
+    #perfHud b { color: #7fe0a8; font-weight: 700; }
+
     /* subtle "reframe" affordance — bottom-right, mirrors the hint pill */
     #btnReframe {
       position: absolute; right: 16px; bottom: 14px; z-index: 7;
@@ -625,7 +636,11 @@
         <span class="live"></span>
         <span class="txt">Observation Vivarium<span>Live · procedural idle</span></span>
       </div>
-      <div id="hud">drag orbit · scroll zoom · right-drag pan</div>
+      <div id="hud">drag orbit · scroll zoom · right-drag pan · <b>`</b> perf</div>
+      <!-- Perf HUD (real-GPU validation): FPS / frame-ms / draw calls / triangles /
+           tier + passes. Hidden until toggled with the backtick (`) key; also at
+           window.__perf. Docked top-LEFT so it never overlaps the top-right placard. -->
+      <div id="perfHud"></div>
       <button id="btnReframe" title="Reframe the hero shot · double-click to toggle a slow turntable">Reframe</button>
       <div id="err"></div>
 
