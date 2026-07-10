@@ -21,6 +21,7 @@ import { EMOTIONS, emotionParams } from './face.js';
 import { upgradeToSkinned } from './rig.js';
 import { createLocomotion } from './locomotion.js';
 import { createSprings } from './springs.js';
+import { createBehavior, BEHAVIOR_NAMES } from './behavior.js';
 import { POSES, POSE_NAMES } from './poses.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,9 @@ let currentSprings = null;    // secondary spring-bone pass (null in voxel/capsu
 let springsEnabled = true;    // window.__testbed.setSprings — persists across rebuilds
 let currentGait = 'idle';     // 'idle' | 'walk' | 'run' | 'fly' — persists across rebuilds
 let currentPoseName = 'idle'; // last applied pose; re-applied across rebuilds
+let currentBehavior = null;   // BehaviorController (FSM over the 9 behaviors); null in voxel/capsule
+let currentBehaviorName = 'manual'; // 'manual' (hand controls) | a behavior name; persists across rebuilds
+let autoLive = false;         // auto "live" mode — the behavior brain drives itself; persists across rebuilds
 let rebuildTimer = null;
 
 // Skin/view settings live on window.__* so the headless tools (render.mjs /
@@ -335,9 +339,26 @@ function rebuild() {
   // the safe reset on a geometry discontinuity. Runs LAST in animate().
   currentSprings = createSprings(currentDragon, currentRig);
   if (currentSprings) currentSprings.enabled = springsEnabled;
+  // Behavior FSM (the two-level brain→motor controller over the 9 behaviors +
+  // auto/live mode). Inert in voxel/capsule. Restore the persisted behavior + auto
+  // state so an age-scrub / genome edit keeps the creature living its life; settle
+  // the pose immediately (immediate=true) so the rebuild doesn't replay a fade.
+  currentBehavior = createBehavior(currentDragon, currentRig, currentLoco, { setMood: applyMood });
+  if (currentBehavior) {
+    if (currentBehaviorName !== 'manual') currentBehavior.setBehavior(currentBehaviorName, true);
+    currentBehavior.setAuto(autoLive);
+  }
   // Refit the soft contact-shadow blob to the new silhouette (high tier only).
   refreshContactShadow();
   updateReadout();
+}
+
+// Apply a face emotion preset LIVE (updates the face rig without touching the
+// genome / emotion dropdown), so a behavior's mood composes over — and never
+// permanently clobbers — the user's manual emotion. Used by the behavior FSM.
+function applyMood(name) {
+  if (!currentDragon) return;
+  setDragonFace(currentDragon, emotionParams(name));
 }
 
 // Fit the camera to the live dragon's bounds at a pleasing 3/4 hero angle, sat a
@@ -626,7 +647,73 @@ if (poseSel) {
     poseSel.appendChild(opt);
   }
   poseSel.value = currentPoseName;
-  poseSel.addEventListener('change', () => { applyPoseByName(poseSel.value); });
+  poseSel.addEventListener('change', () => {
+    // Choosing a manual stance drops out of any active behavior / auto mode so the
+    // hand pose wins (the behavior motor would otherwise overwrite poseBase).
+    setBehaviorUI('manual');
+    applyPoseByName(poseSel.value);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Behavior FSM controls — the Stance section, extended into a full BEHAVIOR
+// selector (the 9 behaviors + a 'manual (pose)' option that hands control back to
+// the Stance select) plus an "Auto (live)" toggle that lets the brain drive itself.
+// Behavior/auto persist across rebuilds (age scrub / genome edits keep it living).
+// ---------------------------------------------------------------------------
+const behaviorSel = document.getElementById('behavior');
+const autoLiveEl = document.getElementById('autoLive');
+
+// Select a behavior in the UI + controller. 'manual' hands control back to the
+// Stance pose + persisted gait + the user's manual emotion.
+function setBehaviorUI(name) {
+  currentBehaviorName = name;
+  if (behaviorSel && behaviorSel.value !== name) behaviorSel.value = name;
+  if (currentBehavior) currentBehavior.setBehavior(name);
+  if (name === 'manual') {
+    // restore the hand pose, persisted gait, and the user's manual emotion.
+    applyPoseByName(currentPoseName);
+    if (currentLoco) currentLoco.setSpeed(currentGait);
+    applyLiveFace();
+  }
+}
+
+// Toggle auto/live mode. Enabling it lets the behavior brain step on its own; if
+// we were in manual, seed it from a calm 'standing' first.
+function setAutoUI(on) {
+  autoLive = (on === undefined) ? !autoLive : !!on;
+  if (autoLiveEl) autoLiveEl.checked = autoLive;
+  if (autoLive && currentBehaviorName === 'manual') {
+    currentBehaviorName = 'standing';
+    if (behaviorSel) behaviorSel.value = 'standing';
+  }
+  if (currentBehavior) {
+    if (currentBehaviorName !== 'manual') currentBehavior.setBehavior(currentBehaviorName);
+    currentBehavior.setAuto(autoLive);
+  }
+  return autoLive;
+}
+
+if (behaviorSel) {
+  const optM = document.createElement('option');
+  optM.value = 'manual'; optM.textContent = 'manual (pose)';
+  behaviorSel.appendChild(optM);
+  for (const name of BEHAVIOR_NAMES) {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    behaviorSel.appendChild(opt);
+  }
+  behaviorSel.value = currentBehaviorName;
+  behaviorSel.addEventListener('change', () => {
+    // Explicit behavior pick turns auto OFF (manual selection is exclusive of the
+    // autonomous walk); 'manual' hands control to the Stance pose.
+    if (autoLive) setAutoUI(false);
+    setBehaviorUI(behaviorSel.value);
+  });
+}
+if (autoLiveEl) {
+  autoLiveEl.checked = autoLive;
+  autoLiveEl.addEventListener('change', () => setAutoUI(autoLiveEl.checked));
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +927,11 @@ function animate() {
   const t = animClock.getElapsedTime();
   const dt = Math.min(0.05, t - lastLocoT);
   lastLocoT = t;
+  // Behavior FSM: the brain picks a behavior, the motor layer writes a CROSS-FADED
+  // key pose into poseBase + sets the gait + face mood. Runs FIRST so the idle
+  // sway / locomotion / springs then compose on top. No-op in 'manual' mode (the
+  // hand pose/gait/emotion controls drive the rig) and in voxel/capsule.
+  if (currentBehavior) currentBehavior.update(dt, t);
   // Gentle always-on idle: breathing + low-amplitude axial sway + ear idle,
   // composed on top of the current pose. Cheap, sine-based, deterministic.
   // (Runs BEFORE the render so the posed/idle frame is what gets drawn.)
@@ -941,4 +1033,18 @@ window.__testbed = {
   setSprings: (on) => { springsEnabled = (on === undefined) ? !springsEnabled : !!on;
     if (currentSprings) currentSprings.enabled = springsEnabled; return springsEnabled; },
   get springs() { return springsEnabled; },
+  // --- Behavior FSM API (Phase-3 animation) ------------------------------
+  // Drive the two-level behavior controller. setBehavior(name) strikes one of the
+  // nine behaviors (resting/roosting/standing/posturing/begging/playing/walking/
+  // running/flying) with a smooth cross-fade — realized as pose + gait + mood — or
+  // 'manual' to hand control back to the Stance pose. setAuto(true) enables the
+  // autonomous weighted random-walk "live" showcase.
+  setBehavior: (name) => { setBehaviorUI(name); return currentBehaviorName; },
+  setAuto: (on) => setAutoUI(on),
+  get behavior() { return currentBehavior ? currentBehavior.behavior : currentBehaviorName; },
+  get autoLive() { return autoLive; },
+  // The behaviors this dragon's body plan can actually perform (per-archetype
+  // filtering: no flying for a wingless plan, no beg/play/etc. for a snake).
+  get behaviors() { return currentBehavior ? currentBehavior.available : []; },
+  behaviorNames: BEHAVIOR_NAMES,
 };
