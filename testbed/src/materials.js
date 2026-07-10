@@ -229,33 +229,41 @@ export function mouthMaterial(tier = 'high', color) {
     clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 0.6,
   });
 }
-// Ear outer plate — hide with slight transmission; `color` overrides the default.
+// Ear outer plate — grown hide. PERF: transmission dropped (only the HERO wing
+// membrane + sail keep the expensive translucent path); a light clearcoat sheen
+// stands in for the former subtle backlit glow at a fraction of the fill cost.
+// `color` overrides the default.
 export function earOuterMaterial(tier = 'high', color) {
   const c = color ?? new THREE.Color(0x4a3b38);
   if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, metalness: 0 });
   return new THREE.MeshPhysicalMaterial({
     color: c, roughness: 0.6, metalness: 0, side: THREE.DoubleSide,
-    transmission: 0.2, thickness: 0, ior: 1.4, transparent: false, opacity: 1,
+    clearcoat: 0.15, clearcoatRoughness: 0.5,
     envMapIntensity: HIGH_ENV_INTENSITY,
   });
 }
-// Ear inner — pinker inset, more transmissive; `color` overrides the default.
+// Ear inner — pinker inset. PERF: transmission dropped; a very slight emissive
+// warmth (self-lit flesh tint) fakes the backlit inner-ear glow with zero
+// transmission cost. `color` overrides the default.
 export function earInnerMaterial(tier = 'high', color) {
   const c = color ?? new THREE.Color(0x9a5f63);
   if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: 0 });
   return new THREE.MeshPhysicalMaterial({
-    color: c, roughness: 0.7, metalness: 0, side: THREE.DoubleSide,
-    transmission: 0.3, thickness: 0, ior: 1.4, transparent: false, opacity: 1,
+    color: c, roughness: 0.6, metalness: 0, side: THREE.DoubleSide,
+    clearcoat: 0.12, clearcoatRoughness: 0.5,
+    emissive: c.clone().multiplyScalar(0.1),   // faux backlit-flesh warmth, no transmission
     envMapIntensity: HIGH_ENV_INTENSITY,
   });
 }
-// Frill petals — thin fleshy fan; `color` (membrane-family tint) overrides default.
+// Frill petals — thin fleshy fan. PERF: transmission dropped; faint emissive tint
+// approximates the former translucency. `color` (membrane-family tint) overrides.
 export function frillMaterial(tier = 'high', color) {
   const c = color ?? new THREE.Color(0x6a4a52);
   if (!isHigh(tier)) return new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: 0, side: THREE.DoubleSide });
   return new THREE.MeshPhysicalMaterial({
-    color: c, roughness: 0.65, metalness: 0, side: THREE.DoubleSide,
-    transmission: 0.25, thickness: 0, ior: 1.4, transparent: false, opacity: 1,
+    color: c, roughness: 0.6, metalness: 0, side: THREE.DoubleSide,
+    clearcoat: 0.12, clearcoatRoughness: 0.5,
+    emissive: c.clone().multiplyScalar(0.06),
     envMapIntensity: HIGH_ENV_INTENSITY,
   });
 }
