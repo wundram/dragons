@@ -23,6 +23,7 @@ import { createLocomotion } from './locomotion.js';
 import { createSprings } from './springs.js';
 import { createBehavior, BEHAVIOR_NAMES } from './behavior.js';
 import { POSES, POSE_NAMES } from './poses.js';
+import { crossover, randomGenome as randomGenomeSeeded, starterRoster } from './breeding.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -849,6 +850,294 @@ document.getElementById('btnGalTree').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
+// BREEDING — roster of saved dragons + genome crossover UI.
+//
+// A dragon roster (genome + name + id + parent lineage + a thumbnail dataURL)
+// lives in memory (persisted to localStorage when available). Breeding picks two
+// parents (roster entries or the live "current" dragon), crosses them via
+// breeding.js's deterministic crossover(), loads the child as a BABY (age 0) so
+// you can scrub Age to watch it grow, and files the child back into the roster
+// with its lineage. Thumbnails reuse the in-app renderer (like the gallery).
+// ---------------------------------------------------------------------------
+let roster = [];             // [{ id, name, genome, parents:[idA,idB]|null, thumb }]
+let idCounter = 0;
+let childCounter = 0;
+let breedSeq = 1;            // deterministic-but-advancing seed for successive UI breeds
+let selA = 'current';       // current Parent A selection (entry id or 'current')
+let selB = 'current';       // current Parent B selection
+const LS_KEY = 'dragons.roster.v1';
+
+function makeId() { return 'd' + (idCounter++).toString(36) + Date.now().toString(36).slice(-4); }
+
+const parentA = document.getElementById('parentA');
+const parentB = document.getElementById('parentB');
+const breedStrip = document.getElementById('breedStrip');
+const lineageEl = document.getElementById('lineage');
+const rosterList = document.getElementById('rosterList');
+const rosterCountEl = document.getElementById('rosterCount');
+
+// Render a genome to a small PNG dataURL using the single scene renderer. Renders
+// at `thumbAge` (adults read best for recognising inheritance). Hides the live
+// dragon + restores camera state, exactly like the gallery does.
+function renderThumbnail(g, thumbAge = 1) {
+  const env = {
+    skinMode: window.__skinMode ?? 'smooth',
+    voxelRes: window.__voxelRes ?? 24,
+    showRig: window.__showRig ?? false,
+    renderTier: window.__renderTier ?? 'high',
+  };
+  const d = generateDragon(g, thumbAge, env);
+  const mainVisible = currentDragon ? currentDragon.visible : false;
+  if (currentDragon) currentDragon.visible = false;
+  scene.add(d);
+  applyEnvMapIntensity(d, tierCfg().envMapIntensity);
+  const savedPos = camera.position.clone();
+  const savedTarget = controls.target.clone();
+  const savedNear = camera.near, savedFar = camera.far;
+  frameObject(d);
+  renderFrame();
+  let url = '';
+  try { url = canvas.toDataURL('image/png'); } catch { url = ''; }
+  scene.remove(d);
+  disposeDragon(d);
+  if (currentDragon) currentDragon.visible = mainVisible;
+  camera.position.copy(savedPos);
+  camera.near = savedNear; camera.far = savedFar;
+  camera.updateProjectionMatrix();
+  controls.target.copy(savedTarget);
+  controls.update();
+  return url;
+}
+
+// Load a genome into the live viewer through the NORMAL genome path + regenerate()
+// (so all features / skin / animation apply). opts.asBaby (or opts.age===0) loads
+// it as a hatchling so Age can be scrubbed to watch it grow.
+function loadGenome(g, opts = {}) {
+  genome = { ...DEFAULT_GENOME, ...g };
+  if (opts.asBaby || opts.age === 0) {
+    age = 0;
+    ageInput.value = '0';
+    ageVal.textContent = '0.00';
+    paintAgeFill();
+  } else if (typeof opts.age === 'number') {
+    age = Math.max(0, Math.min(1, opts.age));
+    ageInput.value = String(age);
+    ageVal.textContent = age.toFixed(2);
+    paintAgeFill();
+  }
+  setArchetypeCustom();
+  syncSliders();
+  rebuild();
+  frameDragon(true);
+  return genome;
+}
+
+// Resolve a parent select value ('current' or a roster id) to a genome copy.
+function genomeForParent(value) {
+  if (value === 'current' || !value) return { ...genome };
+  const e = roster.find((x) => x.id === value);
+  return e ? { ...e.genome } : { ...genome };
+}
+function nameForParent(value) {
+  if (value === 'current' || !value) return 'Current';
+  const e = roster.find((x) => x.id === value);
+  return e ? e.name : 'Current';
+}
+
+// Persist the roster (best-effort; thumbnails are dataURLs so keep it bounded).
+function persistRoster() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(
+      roster.map((e) => ({ id: e.id, name: e.name, genome: e.genome, parents: e.parents, thumb: e.thumb }))
+    ));
+  } catch { /* quota / unavailable — in-memory roster still works */ }
+}
+
+function addToRoster(entry) {
+  const e = {
+    id: entry.id || makeId(),
+    name: entry.name || `Dragon ${roster.length + 1}`,
+    genome: { ...entry.genome },
+    parents: entry.parents || null,
+    thumb: entry.thumb ?? renderThumbnail(entry.genome),
+  };
+  roster.push(e);
+  persistRoster();
+  refreshParentSelects();
+  refreshRosterUI();
+  return e;
+}
+
+// Save the current dragon to the roster.
+function saveToRoster(name) {
+  const e = addToRoster({ name: name || `Dragon ${roster.length + 1}`, genome: { ...genome } });
+  return e;
+}
+
+// The core breed: crossover(a,b,seed) -> child genome (deterministic). Exposed raw
+// on window.__testbed.breed for headless testing.
+function breed(aGenome, bGenome, seed) {
+  return crossover(aGenome, bGenome, seed == null ? breedSeq : seed);
+}
+
+// UI breed: cross the two selected parents, load the child as a baby, file it in
+// the roster with lineage, and paint the A × B → child strip.
+function doBreed() {
+  const aVal = selA, bVal = selB;
+  const aG = genomeForParent(aVal);
+  const bG = genomeForParent(bVal);
+  const seed = breedSeq++;
+  const child = crossover(aG, bG, seed);
+
+  // Load as a hatchling so Age scrubs the growth.
+  loadGenome(child, { asBaby: true });
+
+  // Resolve parent ids: a 'current' parent isn't a roster entry, so record null
+  // for it (lineage shows the display name regardless).
+  const parents = [
+    aVal === 'current' ? null : aVal,
+    bVal === 'current' ? null : bVal,
+  ];
+  const childName = `Hatchling ${++childCounter}`;
+  const entry = addToRoster({ name: childName, genome: child, parents, thumb: renderThumbnail(child) });
+
+  // Paint the result strip: A × B → child (parents rendered as adults for contrast).
+  const aThumb = aVal === 'current' ? renderThumbnail(aG) : (roster.find((x) => x.id === aVal)?.thumb || renderThumbnail(aG));
+  const bThumb = bVal === 'current' ? renderThumbnail(bG) : (roster.find((x) => x.id === bVal)?.thumb || renderThumbnail(bG));
+  const aName = nameForParent(aVal), bName = nameForParent(bVal);
+  breedStrip.classList.add('on');
+  breedStrip.innerHTML =
+    `<div class="bc"><img src="${aThumb}" alt="Parent A"><small>${escapeHtml(aName)}</small></div>` +
+    `<div class="op">×</div>` +
+    `<div class="bc"><img src="${bThumb}" alt="Parent B"><small>${escapeHtml(bName)}</small></div>` +
+    `<div class="op">→</div>` +
+    `<div class="bc child"><img src="${entry.thumb}" alt="Child"><small>${escapeHtml(childName)}</small></div>`;
+  lineageEl.innerHTML = `<b>${escapeHtml(childName)}</b> — child of ${escapeHtml(aName)} × ${escapeHtml(bName)} · loaded as a hatchling · scrub Age to grow`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// (Re)build the Parent A / Parent B <select> options from the roster (+ a live
+// "Current dragon" option). Preserves the current selection when possible.
+function refreshParentSelects() {
+  for (const [sel, cur, setter] of [[parentA, selA, (v) => selA = v], [parentB, selB, (v) => selB = v]]) {
+    sel.innerHTML = '';
+    const optC = document.createElement('option');
+    optC.value = 'current'; optC.textContent = 'Current dragon';
+    sel.appendChild(optC);
+    for (const e of roster) {
+      const o = document.createElement('option');
+      o.value = e.id; o.textContent = e.name;
+      sel.appendChild(o);
+    }
+    const has = [...sel.options].some((o) => o.value === cur);
+    sel.value = has ? cur : 'current';
+    setter(sel.value);
+  }
+  // Nudge toward two distinct parents on first populate.
+  if (selA === 'current' && selB === 'current' && roster.length >= 2) {
+    parentA.value = roster[0].id; selA = roster[0].id;
+    parentB.value = roster[1].id; selB = roster[1].id;
+  }
+}
+
+// Rebuild the roster card list.
+function refreshRosterUI() {
+  rosterCountEl.textContent = roster.length ? `· ${roster.length}` : '';
+  rosterList.innerHTML = '';
+  for (const e of roster) {
+    const item = document.createElement('div');
+    item.className = 'roster-item' + (e.id === selA ? ' selA' : '') + (e.id === selB ? ' selB' : '');
+
+    const img = document.createElement('img');
+    img.src = e.thumb || '';
+    img.alt = e.name;
+    img.title = 'Load ' + e.name;
+    img.addEventListener('click', () => loadGenome(e.genome));
+
+    const meta = document.createElement('div');
+    meta.className = 'ri-meta';
+    meta.title = 'Load ' + e.name;
+    const nm = document.createElement('span');
+    nm.className = 'ri-name'; nm.textContent = e.name;
+    const sub = document.createElement('span');
+    sub.className = 'ri-sub';
+    sub.textContent = e.parents ? `⑃ ${parentLabel(e.parents[0])} × ${parentLabel(e.parents[1])}` : 'founder';
+    meta.append(nm, sub);
+    meta.addEventListener('click', () => loadGenome(e.genome));
+
+    const btns = document.createElement('div');
+    btns.className = 'ri-btns';
+    const aBtn = document.createElement('button');
+    aBtn.className = 'setA' + (e.id === selA ? ' on' : ''); aBtn.textContent = 'A';
+    aBtn.title = 'Set as Parent A';
+    aBtn.addEventListener('click', () => { selA = e.id; parentA.value = e.id; refreshRosterUI(); });
+    const bBtn = document.createElement('button');
+    bBtn.className = 'setB' + (e.id === selB ? ' on' : ''); bBtn.textContent = 'B';
+    bBtn.title = 'Set as Parent B';
+    bBtn.addEventListener('click', () => { selB = e.id; parentB.value = e.id; refreshRosterUI(); });
+    const dBtn = document.createElement('button');
+    dBtn.className = 'del'; dBtn.textContent = '✕';
+    dBtn.title = 'Remove from roster';
+    dBtn.addEventListener('click', () => removeFromRoster(e.id));
+    btns.append(aBtn, bBtn, dBtn);
+
+    item.append(img, meta, btns);
+    rosterList.appendChild(item);
+  }
+}
+
+function parentLabel(id) {
+  if (!id) return 'Current';
+  const e = roster.find((x) => x.id === id);
+  return e ? e.name : '…';
+}
+
+function removeFromRoster(id) {
+  roster = roster.filter((e) => e.id !== id);
+  if (selA === id) selA = 'current';
+  if (selB === id) selB = 'current';
+  persistRoster();
+  refreshParentSelects();
+  refreshRosterUI();
+}
+
+// Wire the controls.
+parentA.addEventListener('change', () => { selA = parentA.value; refreshRosterUI(); });
+parentB.addEventListener('change', () => { selB = parentB.value; refreshRosterUI(); });
+document.getElementById('btnBreed').addEventListener('click', doBreed);
+document.getElementById('btnSaveRoster').addEventListener('click', () => saveToRoster());
+
+// Seed the roster: restore from localStorage, else file the archetype starters.
+function initRoster() {
+  let loaded = false;
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length) {
+        roster = arr.map((e) => ({
+          id: e.id || makeId(), name: e.name || 'Dragon',
+          genome: { ...DEFAULT_GENOME, ...e.genome },
+          parents: e.parents || null, thumb: e.thumb || '',
+        }));
+        loaded = true;
+      }
+    }
+  } catch { /* ignore */ }
+  if (!loaded) {
+    for (const s of starterRoster()) {
+      roster.push({ id: makeId(), name: s.name, genome: { ...s.genome }, parents: null, thumb: renderThumbnail(s.genome) });
+    }
+    persistRoster();
+  }
+  refreshParentSelects();
+  refreshRosterUI();
+}
+
+// ---------------------------------------------------------------------------
 // Genome readout (copyable JSON)
 // ---------------------------------------------------------------------------
 const readout = document.getElementById('readout');
@@ -1047,4 +1336,33 @@ window.__testbed = {
   // filtering: no flying for a wingless plan, no beg/play/etc. for a snake).
   get behaviors() { return currentBehavior ? currentBehavior.available : []; },
   behaviorNames: BEHAVIOR_NAMES,
+  // --- Breeding API (genome crossover + roster) --------------------------
+  // breed(aGenome, bGenome, seed) -> child genome via deterministic crossover
+  // (same parents+seed => identical child). Pure genetics; does NOT touch the
+  // viewer/roster — use breedAndLoad() for the full UI action.
+  breed,
+  // The seeded whole-genome randomiser (deterministic) + fully random parents.
+  randomGenome: randomGenomeSeeded,
+  // Load a genome into the viewer through the normal genome path + regenerate().
+  // opts.asBaby (or opts.age===0) loads it as a hatchling to scrub Age.
+  loadGenome,
+  // Save the current dragon to the roster; returns the new entry.
+  saveToRoster,
+  // The in-memory roster (array of { id, name, genome, parents, thumb }).
+  get roster() { return roster; },
+  // Cross the two currently-selected parents, load the child as a baby, file it
+  // in the roster, and paint the A×B→child strip (the Breed button action).
+  breedAndLoad: doBreed,
+  // Programmatically choose parents by roster id (or 'current').
+  setParents: (a, b) => {
+    if (a != null) { selA = a; if (parentA) parentA.value = a; }
+    if (b != null) { selB = b; if (parentB) parentB.value = b; }
+    refreshRosterUI();
+    return { a: selA, b: selB };
+  },
+  removeFromRoster,
 };
+
+// Seed the roster (localStorage or archetype starters) now that the renderer +
+// __testbed hooks are live (thumbnails render through the single scene renderer).
+initRoster();
