@@ -71,8 +71,8 @@ Research: `research/high-fidelity-rendering.md`; integration review + fixes: `de
 - [x] **Feature coherence + seams** — CA markings flow onto spikes/scutes/feathers, phenotype-driven feature/face colors, mouth reseated as skin crease, spike-root + sail-base seam fairing, body facets reduced (`fieldRes` 64→80, ~22–38ms).
 
 ### 3c. Breeding mechanics + Explorer UX
-- Two-parent genome crossover → egg/baby; inheritance view; family tree. (Genome already supports it; mutation-tree gallery is the first step.)
-- Explorer app shell: pick/breed/watch dragons; camera; behavior selector.
+- [x] **Breeding DONE** — `breeding.js`: deterministic `crossover(A,B,seed)` (continuous blend + Mendelian categoricals + ~14% mutation, seeded mulberry32), roster (localStorage, archetype starters), Explorer breeding panel (Parent A×B → child loaded as a hatchling, lineage readout). Verified: child traits fall between parents; visible trait inheritance (wings + blended color/markings).
+- [x] Explorer app shell: pick/breed/watch dragons; behavior selector + Auto-live; hero camera; render-tier switch. (Feature-complete against the mission.)
 
 ### Remaining creature polish (parallel, low priority)
 - Teeth/tongue/fangs on the jaw hook; feather/scute drama; ear micro-behavior.
